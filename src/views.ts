@@ -95,6 +95,33 @@ label + .hint { margin: -2px 0 0; }
 @keyframes pulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
 .end-reason { font-size: 13px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; opacity: .6 } }
+
+/* Long meeting titles, URLs and quotes must never push the page sideways. */
+h1, .title, .summary, blockquote, .card .task, .turn p { overflow-wrap: anywhere; }
+
+@media (max-width: 640px) {
+  .wrap { padding: 20px 16px 64px; }
+
+  /* Stack the title above the nav; three links don't fit beside it. */
+  header { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 20px; }
+  nav { margin-left: -2px; }
+  nav a { margin: 0 16px 0 0; }
+
+  /* Full-width input above a full-width button — side by side leaves the input
+     too narrow to read a pasted Meet URL. */
+  form.paste { flex-direction: column; }
+  form.paste button { width: 100%; }
+
+  /* 16px stops iOS Safari zooming the page when a field is focused. */
+  input[type=text], input[type=password], input[type=email] { font-size: 16px; }
+
+  /* Meeting title on its own line, status and time beneath it. */
+  ul.meetings a { flex-wrap: wrap; gap: 6px 10px; padding: 13px 2px; }
+  .title { flex-basis: 100%; }
+
+  h1 { font-size: 19px; }
+  .actions form, .actions button { width: 100%; }
+}
 `;
 
 export function layout(
