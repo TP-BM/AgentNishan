@@ -68,7 +68,7 @@ So three signals, in priority order:
 |---|---|---|
 | Transcript stops growing while the bot is still active | 6 polls (2 min) | The normal case — a call that ended |
 | Bot disappears from `/bots/status` | 2 polls (~40s) | Bot crashed or was withdrawn |
-| Bot never admitted, nothing transcribed | 45 polls (15 min) | Nobody let it in from the lobby |
+| Bot never admitted, nothing transcribed | 15 polls (5 min) | Nobody let it in from the lobby |
 
 The stall threshold is a trade-off: any silence longer than it ends the meeting
 early. Two minutes suits conversational calls; raise `POLL_STALE_THRESHOLD` if a
@@ -147,18 +147,33 @@ bundler. Storage is `node:sqlite`, so there's no native module to compile.
 
 The poller must survive between meetings, so this needs to run somewhere always
 on — not your laptop. `Dockerfile` and `fly.toml` are set up for Fly.io with a
-persistent volume:
+persistent volume.
+
+**Don't use `fly launch`.** It regenerates `fly.toml` from its own template and
+overwrites `auto_stop_machines = false`. Fly sleeps machines when web traffic
+goes quiet, which here means the poller stops and the meeting is lost — the one
+failure this app cannot tolerate. Create the app explicitly instead:
 
 ```bash
-fly launch --no-deploy
-fly volumes create meetnish_data --size 1
-fly secrets set VEXA_API_KEY=… ANTHROPIC_API_KEY=… APP_SECRET=… \
-                RESEND_API_KEY=… NOTIFY_EMAIL=… APP_BASE_URL=https://your-app.fly.dev
-fly deploy
+fly apps create <name> --org personal
+fly volumes create meetnish_data --size 1 --region fra --yes
+fly secrets set VEXA_BOT_API_KEY=… VEXA_TX_API_KEY=… ANTHROPIC_API_KEY=… \
+                RESEND_API_KEY=… APP_SECRET=… NOTIFY_EMAIL=…
+fly deploy --ha=false
 ```
 
-`auto_stop_machines` is off deliberately — a suspended machine stops polling and
-you lose the meeting.
+Everything non-secret lives in `fly.toml` under `[env]` — base URL, bot name,
+thresholds, leave-command names — so it is version-controlled and reviewable.
+Only the six credentials go to the secret store. `--ha=false` keeps it to one
+machine; two would mean two pollers racing on the same Vexa account.
+
+Confirm it came up correctly:
+
+```bash
+fly logs --app <name> --no-tail | grep -E "\[web\]|\[vexa\]"
+# [web] MeetNish listening on https://<name>.fly.dev
+# [vexa] both keys OK (bot + transcription)
+```
 
 ## Layout
 

@@ -84,8 +84,12 @@ export const config = {
      * quiet for a demo or a long read.
      */
     staleThreshold: Number(optional("POLL_STALE_THRESHOLD", "6")),
-    /** Polls to wait for the bot to be admitted before giving up (20s x 45 = 15 min). */
-    admitThreshold: 45,
+    /**
+     * Polls to wait for the bot to be admitted before giving up (20s x 15 =
+     * 5 min). Too short and it abandons a meeting that starts late; too long
+     * and an unnoticed bot sits in a lobby burning credits.
+     */
+    admitThreshold: Number(optional("POLL_ADMIT_THRESHOLD", "15")),
     /** Absolute ceiling on a single meeting. */
     maxDurationMs: 3 * 60 * 60 * 1000,
   },

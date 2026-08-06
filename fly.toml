@@ -17,6 +17,7 @@ ANTHROPIC_MODEL = "claude-opus-5"
 MAILER = "resend"
 MAIL_FROM = "onboarding@resend.dev"
 POLL_STALE_THRESHOLD = "6"
+POLL_ADMIT_THRESHOLD = "15"
 LEAVE_COMMAND_ENABLED = "true"
 LEAVE_COMMAND_NAMES = "nishan,nishaan,nishawn,nissan,nish"
 
