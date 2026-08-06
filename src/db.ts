@@ -27,6 +27,7 @@ export interface MeetingRow {
   poll_count: number;
   last_segment_count: number;
   bot_outcome: string | null;
+  end_reason: string | null;
   emailed_at: number | null;
 }
 
@@ -121,6 +122,10 @@ function ensureColumn(table: string, column: string, definition: string): void {
 // reported in the meeting. Added after Vexa turned out to leave bots running
 // indefinitely once a call ends.
 ensureColumn("meetings", "stale_polls", "INTEGER NOT NULL DEFAULT 0");
+
+// Why the meeting ended — shown in the UI so a surprise ending is explainable
+// (especially the voice command, which fires without anyone touching the app).
+ensureColumn("meetings", "end_reason", "TEXT");
 
 export function newId(): string {
   return randomBytes(6).toString("hex");

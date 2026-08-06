@@ -79,6 +79,35 @@ admission timeout instead.
 That logic is pure and tested — see `src/poll-decision.ts` and
 `test/poll-decision.test.ts`.
 
+### Voice command: "Nishan, leave the meeting"
+
+Say the bot's name followed by a departure instruction and it leaves, then
+digests what it captured. The bot cannot hear — this reads the transcript on
+each poll — so there are two consequences worth setting expectations around:
+
+- **It is not instant.** One poll interval plus transcription lag: roughly
+  20–40s. People will repeat themselves. Lower `POLL_INTERVAL_MS` if that
+  matters more than API calls.
+- **It depends on speech-to-text getting the name close.** "Nishan" routinely
+  arrives as "Nissan". `LEAVE_COMMAND_NAMES` is a list of variants for exactly
+  this reason — add whatever mishearings you observe in real transcripts.
+
+Matching requires a name *and* a command phrase, with the command starting
+within 60 characters after the name. Both halves are needed so that "Marcus had
+to leave the meeting early" doesn't end the call. Recognised commands: `leave
+the meeting/call/room`, `exit the meeting/call`, `you can leave/go`, `please
+leave`, `stop recording/transcribing`, `drop off`.
+
+Set `LEAVE_COMMAND_ENABLED=false`, or leave `LEAVE_COMMAND_NAMES` empty, to
+turn it off. When it fires, the reason is recorded and shown on the meeting page
+so an unexpected ending is explainable.
+
+**Known limitation:** "should we ask Nishan to leave the meeting?" will trigger
+it. Distinguishing a question from an instruction in unpunctuated ASR output is
+not reliably solvable, and the cost is low — the digest is still produced from
+everything captured up to that point, and Vexa keeps the transcript, so
+**Fetch transcript & retry** recovers anything said afterwards.
+
 ### Transcript timestamps
 
 Vexa reports `start`/`end` as **absolute epoch seconds** (`1785972327.053`), not

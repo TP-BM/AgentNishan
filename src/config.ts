@@ -89,6 +89,18 @@ export const config = {
     /** Absolute ceiling on a single meeting. */
     maxDurationMs: 3 * 60 * 60 * 1000,
   },
+
+  /** Voice command: someone says "<name>, leave the meeting" and the bot goes. */
+  leaveCommand: {
+    enabled: optional("LEAVE_COMMAND_ENABLED", "true") !== "false",
+    /** Name variants, including likely speech-to-text mishearings. */
+    names: optional("LEAVE_COMMAND_NAMES", "")
+      .split(",")
+      .map((n) => n.trim().toLowerCase())
+      .filter(Boolean),
+    /** Characters allowed between the name and the command phrase. */
+    window: Number(optional("LEAVE_COMMAND_WINDOW", "60")),
+  },
 } as const;
 
 if (missing.length > 0) {

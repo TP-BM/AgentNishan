@@ -13,6 +13,7 @@ import {
 } from "./db.ts";
 import { generateDigest } from "./digest.ts";
 import { digestEmail, digestSubject, mailer, notAdmittedEmail } from "./mailer.ts";
+import { detectLeaveCommand } from "./leave-command.ts";
 import { decide } from "./poll-decision.ts";
 import { toPlainText, toRows } from "./transcript.ts";
 import {
@@ -109,6 +110,30 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
   }
 
   const segmentCount = countSegments(meeting.id);
+
+  // 1b. Did anyone ask the bot to leave?
+  //
+  // Checked before the end-detection signals so an explicit instruction wins
+  // over the timers. Scans the whole transcript rather than just this poll's
+  // additions: cheap, and it means a command spoken during a poll that failed
+  // is still honoured on the next one.
+  if (config.leaveCommand.enabled && config.leaveCommand.names.length > 0) {
+    const match = detectLeaveCommand(toPlainText(getSegments(meeting.id)), {
+      names: config.leaveCommand.names,
+      window: config.leaveCommand.window,
+    });
+    if (match !== null) {
+      console.log(
+        `[poll] ${meeting.id} leave command heard: "${match.excerpt}"`,
+      );
+      updateMeeting(meeting.id, {
+        last_segment_count: segmentCount,
+        end_reason: `Someone asked the bot to leave — heard "${match.name} ${match.command}".`,
+      });
+      await finalise(meeting.id, `voice command: "${match.name} ${match.command}"`);
+      return;
+    }
+  }
 
   // 2. Is the bot actually in the room?
   //
@@ -237,7 +262,12 @@ export async function finalise(meetingId: string, reason: string): Promise<void>
   if (meeting === undefined) return;
 
   console.log(`[poll] finalising ${meetingId}: ${reason}`);
-  updateMeeting(meetingId, { status: "transcribing", ended_at: Date.now() });
+  updateMeeting(meetingId, {
+    status: "transcribing",
+    ended_at: Date.now(),
+    // Don't clobber a more specific reason already recorded by the caller.
+    end_reason: meeting.end_reason ?? reason,
+  });
 
   await stopBot(meeting.native_meeting_id).catch(() => {});
 

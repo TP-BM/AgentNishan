@@ -93,6 +93,7 @@ label + .hint { margin: -2px 0 0; }
   animation: pulse 1.8s ease-in-out infinite;
 }
 @keyframes pulse { 0%, 100% { opacity: .25 } 50% { opacity: 1 } }
+.end-reason { font-size: 13px; color: var(--muted); }
 @media (prefers-reduced-motion: reduce) { .live-dot { animation: none; opacity: .6 } }
 `;
 
@@ -328,6 +329,10 @@ ${turns
 <h1 style="margin-bottom:6px">${escapeHtml(meeting.title === "" ? meeting.native_meeting_id : meeting.title)}</h1>
 <p class="hint"><a href="${escapeHtml(meeting.meet_url)}">${escapeHtml(meeting.native_meeting_id)}</a> · ${escapeHtml(relative(meeting.created_at))}${
       digest === undefined ? "" : ` · digest by ${escapeHtml(digest.model)}`
+    }${
+      meeting.end_reason === null || isActive
+        ? ""
+        : `<br><span class="end-reason">Ended: ${escapeHtml(meeting.end_reason)}</span>`
     }</p>
 ${statusLine}
 ${digestBody}
