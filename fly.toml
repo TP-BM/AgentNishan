@@ -1,11 +1,24 @@
-app = "meetnish"
+# Fly app names are globally unique and must be lowercase.
+app = "nishan"
 primary_region = "fra"
 
 [build]
 
+# Non-sensitive configuration lives here so it is version-controlled and
+# reviewable. Credentials go to `fly secrets set` instead.
 [env]
 PORT = "8080"
 DATABASE_PATH = "/data/meetnish.db"
+APP_BASE_URL = "https://nishan.fly.dev"
+VEXA_BASE_URL = "https://api.cloud.vexa.ai"
+VEXA_BOT_NAME = "Thilina's Agent (Nishan)"
+VEXA_LANGUAGE = "en"
+ANTHROPIC_MODEL = "claude-opus-5"
+MAILER = "resend"
+MAIL_FROM = "onboarding@resend.dev"
+POLL_STALE_THRESHOLD = "6"
+LEAVE_COMMAND_ENABLED = "true"
+LEAVE_COMMAND_NAMES = "nishan,nishaan,nishawn,nissan,nish"
 
 # The poller has to keep running between meetings, so the machine must not be
 # suspended or stopped when HTTP traffic goes quiet.
