@@ -207,16 +207,34 @@ ${digest.risks.length === 0 ? "" : section("Risks raised", list(digest.risks.map
   return { html, text: textParts.join("\n") };
 }
 
+/**
+ * `denied` distinguishes the two ways admission fails. They read very
+ * differently to whoever gets this mail: nobody noticed the request, versus
+ * somebody looked at it and said no.
+ */
 export function notAdmittedEmail(
   meetUrl: string,
   meetingUrl: string,
+  denied = false,
 ): { subject: string; html: string; text: string } {
-  const subject = "Notetaker was never let into the meeting";
-  const text = `The bot was sent to ${meetUrl} but nobody admitted it from the lobby, so there is no transcript.\n\n${meetingUrl}`;
+  const subject = denied
+    ? "Notetaker was denied entry to the meeting"
+    : "Notetaker was never let into the meeting";
+  const headline = denied
+    ? "No transcript — bot was denied"
+    : "No transcript — bot wasn't admitted";
+  const body = denied
+    ? `someone in the meeting declined its request to join, so there is nothing to summarise.`
+    : `it stayed in the lobby for the whole meeting, so there is nothing to summarise.`;
+  const advice = denied
+    ? "Let an attendee know the notetaker is coming, then send it again."
+    : "Someone already in the meeting has to admit the bot. If this keeps happening, ask a regular attendee to let it in.";
+
+  const text = `The bot was sent to ${meetUrl} but ${body}\n\n${advice}\n\n${meetingUrl}`;
   const html = `<div style="font:15px/1.6 -apple-system,Segoe UI,Roboto,sans-serif;color:#111827;max-width:640px;margin:0 auto;padding:24px">
-<h1 style="font-size:20px;margin:0 0 12px">No transcript — bot wasn't admitted</h1>
-<p style="margin:0 0 16px;color:#374151">The bot was sent to <a href="${escapeHtml(meetUrl)}">${escapeHtml(meetUrl)}</a> but stayed in the lobby for the whole meeting, so there is nothing to summarise.</p>
-<p style="margin:0;color:#6b7280">Someone already in the meeting has to admit the bot. If this keeps happening, ask a regular attendee to let it in.</p>
+<h1 style="font-size:20px;margin:0 0 12px">${escapeHtml(headline)}</h1>
+<p style="margin:0 0 16px;color:#374151">The bot was sent to <a href="${escapeHtml(meetUrl)}">${escapeHtml(meetUrl)}</a> but ${escapeHtml(body)}</p>
+<p style="margin:0;color:#6b7280">${escapeHtml(advice)}</p>
 <p style="margin:24px 0 0"><a href="${escapeHtml(meetingUrl)}" style="color:#2563eb">View in MeetNish →</a></p>
 </div>`;
   return { subject, html, text };

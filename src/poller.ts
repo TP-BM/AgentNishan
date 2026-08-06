@@ -13,8 +13,8 @@ import {
 } from "./db.ts";
 import { generateDigest } from "./digest.ts";
 import { digestEmail, digestSubject, mailer, notAdmittedEmail } from "./mailer.ts";
-import { detectLeaveCommand } from "./leave-command.ts";
-import { decide } from "./poll-decision.ts";
+import { describeMatch, detectLeaveCommand } from "./leave-command.ts";
+import { classifyAdmission, decide } from "./poll-decision.ts";
 import { toPlainText, toRows } from "./transcript.ts";
 import {
   getBotState,
@@ -117,20 +117,23 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
   // over the timers. Scans the whole transcript rather than just this poll's
   // additions: cheap, and it means a command spoken during a poll that failed
   // is still honoured on the next one.
-  if (config.leaveCommand.enabled && config.leaveCommand.names.length > 0) {
+  const listeningForName = config.leaveCommand.names.length > 0;
+  if (config.leaveCommand.enabled && (listeningForName || config.leaveCommand.nameless)) {
     const match = detectLeaveCommand(toPlainText(getSegments(meeting.id)), {
       names: config.leaveCommand.names,
       window: config.leaveCommand.window,
+      nameless: config.leaveCommand.nameless,
     });
     if (match !== null) {
+      const heard = describeMatch(match);
       console.log(
         `[poll] ${meeting.id} leave command heard: "${match.excerpt}"`,
       );
       updateMeeting(meeting.id, {
         last_segment_count: segmentCount,
-        end_reason: `Someone asked the bot to leave — heard "${match.name} ${match.command}".`,
+        end_reason: `Someone asked the bot to leave — heard "${heard}".`,
       });
-      await finalise(meeting.id, `voice command: "${match.name} ${match.command}"`);
+      await finalise(meeting.id, `voice command: "${heard}"`);
       return;
     }
   }
@@ -163,6 +166,25 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
     console.warn("[poll] bot status check failed:", (error as Error).message);
     updateMeeting(meeting.id, { last_segment_count: segmentCount });
     return;
+  }
+
+  // 2b. Was the bot turned away at the door?
+  //
+  // Admission has two failure modes and they deserve different answers: nobody
+  // got round to it (wait, it may still happen) versus someone clicked Deny
+  // (it never will). Vexa records the second within seconds, so read it rather
+  // than sitting out the full admission timeout — a real meeting spent 5
+  // minutes "waiting" for a bot that had been rejected 35 seconds in.
+  //
+  // Only worth asking while still in the lobby, which bounds it to at most
+  // `admitThreshold` extra calls per meeting.
+  if (!running && meeting.bot_seen === 0 && segmentCount === 0) {
+    const verdict = classifyAdmission(await getMeetingDetail(meeting.vexa_meeting_id));
+    if (verdict.rejected) {
+      console.log(`[poll] ${meeting.id} bot was denied at the lobby (${verdict.outcome})`);
+      await failNotAdmitted(meeting, verdict.outcome, true);
+      return;
+    }
   }
 
   const stalled = segmentCount === meeting.last_segment_count;
@@ -230,11 +252,16 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
   }
 }
 
-async function failNotAdmitted(meeting: MeetingRow, outcome: string): Promise<void> {
+async function failNotAdmitted(
+  meeting: MeetingRow,
+  outcome: string,
+  denied = false,
+): Promise<void> {
   updateMeeting(meeting.id, {
     status: "failed",
-    error:
-      "The bot was never admitted to the meeting, so there is no transcript. Someone already in the meeting has to let it in from the lobby.",
+    error: denied
+      ? "Someone in the meeting denied the bot's request to join, so there is no transcript. Send it again once an attendee knows to expect it."
+      : "The bot was never admitted to the meeting, so there is no transcript. Someone already in the meeting has to let it in from the lobby.",
     bot_outcome: outcome,
     ended_at: Date.now(),
   });
@@ -247,6 +274,7 @@ async function failNotAdmitted(meeting: MeetingRow, outcome: string): Promise<vo
   const message = notAdmittedEmail(
     meeting.meet_url,
     `${config.baseUrl}/m/${meeting.id}`,
+    denied,
   );
   try {
     await mailer().send({ to: identity.email, ...message });

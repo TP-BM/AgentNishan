@@ -49,6 +49,55 @@ export type PollDecision =
   | { action: "not-admitted" }
   | { action: "timeout-no-transcript" };
 
+/** The parts of Vexa's meeting record that say how admission went. */
+export interface AdmissionDetail {
+  status?: string | undefined;
+  completion_reason?: string | undefined;
+  failure_stage?: string | undefined;
+}
+
+export type AdmissionVerdict =
+  | { rejected: true; outcome: string }
+  | { rejected: false };
+
+/**
+ * Completion reasons that mean someone actively denied the bot at the lobby
+ * door, as opposed to nobody getting round to admitting it.
+ *
+ * An allowlist, for the usual reason: an unrecognised value falls through to
+ * the admission timeout, which is slower but never wrong. A missing entry here
+ * costs five minutes; a wrong entry would end a meeting that was about to
+ * start.
+ *
+ * Only `awaiting_admission_rejected` has been seen live — Vexa recorded it 35
+ * seconds after the request, while our own timeout would have waited 5 minutes.
+ */
+const REJECTED_REASONS = new Set(["awaiting_admission_rejected"]);
+
+/**
+ * Did Vexa already record that this bot will never get in?
+ *
+ * Called only while waiting in the lobby, so a `rejected` verdict is safe to
+ * act on immediately.
+ */
+export function classifyAdmission(detail: AdmissionDetail | null): AdmissionVerdict {
+  if (detail === null) return { rejected: false };
+
+  const reason = detail.completion_reason;
+  if (reason !== undefined && REJECTED_REASONS.has(reason)) {
+    return { rejected: true, outcome: reason };
+  }
+
+  // Belt and braces: the stage is recorded separately from the reason string,
+  // so a renamed reason still lands here as long as the meeting is marked
+  // failed *at the admission step*.
+  if (detail.status === "failed" && detail.failure_stage === "awaiting_admission") {
+    return { rejected: true, outcome: reason ?? "awaiting_admission" };
+  }
+
+  return { rejected: false };
+}
+
 export function decide(state: PollState, limits: Thresholds): PollDecision {
   // A meeting that has run past the ceiling ends regardless of signals.
   if (state.ageMs >= limits.maxDurationMs) {

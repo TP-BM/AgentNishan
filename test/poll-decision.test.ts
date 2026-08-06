@@ -1,6 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { decide, type PollState, type Thresholds } from "../src/poll-decision.ts";
+import {
+  classifyAdmission,
+  decide,
+  type PollState,
+  type Thresholds,
+} from "../src/poll-decision.ts";
 
 const LIMITS: Thresholds = {
   goneThreshold: 2,
@@ -133,4 +138,53 @@ test("a silent bot that never captured anything is not finalised", () => {
     stalePolls: 99,
   };
   assert.equal(decide(state(silent), LIMITS).action, "live");
+});
+
+// ── Admission outcome ────────────────────────────────────────────────────────
+
+test("a denied bot is recognised from the payload Vexa actually returns", () => {
+  // Verbatim from GET /bots for meeting 25561 on 2026-08-06: requested at
+  // 08:00:43, rejected at 08:01:18. Our admission timeout would have waited
+  // until 08:05:43 to say anything.
+  const verdict = classifyAdmission({
+    status: "failed",
+    completion_reason: "awaiting_admission_rejected",
+    failure_stage: "awaiting_admission",
+  });
+  assert.deepEqual(verdict, {
+    rejected: true,
+    outcome: "awaiting_admission_rejected",
+  });
+});
+
+test("a failure at the admission step counts even if the reason is renamed", () => {
+  const verdict = classifyAdmission({
+    status: "failed",
+    failure_stage: "awaiting_admission",
+  });
+  assert.equal(verdict.rejected, true);
+});
+
+test("waiting in the lobby is not a rejection", () => {
+  assert.equal(classifyAdmission({ status: "requested" }).rejected, false);
+  assert.equal(classifyAdmission({ status: "active" }).rejected, false);
+  assert.equal(classifyAdmission(null).rejected, false);
+});
+
+test("an unknown reason falls through to the timeout rather than ending early", () => {
+  // The allowlist has to fail this way round: a reason we have never seen must
+  // not end a meeting that is merely slow to start.
+  assert.equal(
+    classifyAdmission({ status: "failed", completion_reason: "something_new" })
+      .rejected,
+    false,
+  );
+});
+
+test("a failure somewhere other than admission is not a lobby rejection", () => {
+  assert.equal(
+    classifyAdmission({ status: "failed", failure_stage: "transcription" })
+      .rejected,
+    false,
+  );
 });

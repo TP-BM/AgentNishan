@@ -104,6 +104,14 @@ export const config = {
       .filter(Boolean),
     /** Characters allowed between the name and the command phrase. */
     window: Number(optional("LEAVE_COMMAND_WINDOW", "60")),
+    /**
+     * Honour "stop recording" / "stop transcribing" with no name attached.
+     *
+     * On by default: in a room of people the name is the part ASR gets wrong,
+     * and requiring it is what made the command miss in practice. Set to
+     * "false" if a meeting is likely to discuss recording rather than do it.
+     */
+    nameless: optional("LEAVE_COMMAND_NAMELESS", "true") !== "false",
   },
 } as const;
 

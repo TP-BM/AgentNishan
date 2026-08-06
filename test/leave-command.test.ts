@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_NAMES,
+  describeMatch,
   detectLeaveCommand,
   normalise,
 } from "../src/leave-command.ts";
@@ -88,6 +89,82 @@ test("finds the command on a later mention of the name", () => {
     "nishan should own that one yes agreed okay nishan leave the meeting",
   );
   assert.ok(match);
+});
+
+// ── Nameless commands ────────────────────────────────────────────────────────
+// Off by default, so every test above describes behaviour with a name required.
+
+const loose = (text: string) =>
+  detectLeaveCommand(text, { ...CONFIG, nameless: true });
+
+test("nameless commands stay off unless asked for", () => {
+  assert.equal(detect("okay everyone stop recording"), null);
+});
+
+test("fires on a nameless phrase aimed only at a recorder", () => {
+  assert.ok(loose("i don't get it stop recording stop recording is this native"));
+  assert.ok(loose("right we're done here stop transcribing"));
+});
+
+test("nameless matching stays narrow", () => {
+  // The whole point of the short list: these are things people say about each
+  // other, and they must not end the meeting on their own.
+  assert.equal(loose("marcus had to leave the meeting early"), null);
+  assert.equal(loose("can you leave the call when you're done"), null);
+  assert.equal(loose("she said you can go ahead"), null);
+});
+
+test("a negated phrase is not an instruction", () => {
+  assert.equal(loose("we should not stop recording this one"), null);
+  assert.equal(loose("don't stop recording yet"), null);
+  assert.equal(loose("please do not stop transcribing"), null);
+});
+
+test("a negation earlier does not mask a real command later", () => {
+  assert.ok(loose("don't stop recording yet ... okay we're done stop recording"));
+});
+
+test("reports a nameless match with no name", () => {
+  const match = loose("alright thats everything stop recording thanks");
+  assert.equal(match?.name, null);
+  assert.equal(match?.command, "stop recording");
+  assert.equal(describeMatch(match!), "stop recording");
+});
+
+test("real meeting, 2026-08-06: the command was missed three ways", () => {
+  // Verbatim from Vexa for meeting zzn-fhbq-xyg, which ended on the stale
+  // timeout three minutes after the last word rather than on the instruction.
+  // Every miss in this excerpt is a different failure, which is why it is here.
+  const transcript = [
+    "pre-peak let's let's add that to that epic now i will send the epic over in the channel too",
+    "can you leave the meeting", // the ask — no name in it at all
+    "okay thank you guys",
+    "Let's see if Nathan leaves. So, the beginning of the system.", // "Nishan" → "Nathan"
+    "I don't get it. Stop recording. Stop recording. Is this native?",
+    "but to leave in about 20 seconds",
+    "AFL So he stays in the meeting",
+    "Thanks for staying here", // the room noticing it did not work
+  ].join("\n");
+
+  // What shipped at the time: a name was required, and "nathan" was not a
+  // known variant.
+  assert.equal(
+    detectLeaveCommand(transcript, {
+      names: ["nishan", "nishaan", "nishawn", "nissan", "nish"],
+      window: 60,
+    }),
+    null,
+  );
+
+  // "nathan" alone still misses: the name lands 100+ characters from any
+  // command, so widening the window would only stitch together unrelated
+  // speech.
+  assert.equal(detect(transcript), null);
+
+  // The nameless phrase is what actually catches it.
+  const match = loose(transcript);
+  assert.equal(match?.command, "stop recording");
+  assert.equal(match?.name, null);
 });
 
 test("normalise strips punctuation and case", () => {

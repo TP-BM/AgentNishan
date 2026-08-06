@@ -69,6 +69,14 @@ So three signals, in priority order:
 | Transcript stops growing while the bot is still active | 6 polls (2 min) | The normal case — a call that ended |
 | Bot disappears from `/bots/status` | 2 polls (~40s) | Bot crashed or was withdrawn |
 | Bot never admitted, nothing transcribed | 15 polls (5 min) | Nobody let it in from the lobby |
+| Vexa reports `awaiting_admission_rejected` | next poll (~20s) | Someone clicked Deny |
+
+That last row is a shortcut, not a fourth timer. Admission fails in two ways
+that read very differently — nobody got round to it, versus somebody looked and
+said no — and Vexa records the second within seconds. Reading it turns a
+five-minute silence into a 20-second answer with the right explanation. The
+match is an allowlist of known reasons, so an unrecognised value simply falls
+back to the 5-minute timeout.
 
 The stall threshold is a trade-off: any silence longer than it ends the meeting
 early. Two minutes suits conversational calls; raise `POLL_STALE_THRESHOLD` if a
@@ -98,15 +106,54 @@ to leave the meeting early" doesn't end the call. Recognised commands: `leave
 the meeting/call/room`, `exit the meeting/call`, `you can leave/go`, `please
 leave`, `stop recording/transcribing`, `drop off`.
 
-Set `LEAVE_COMMAND_ENABLED=false`, or leave `LEAVE_COMMAND_NAMES` empty, to
-turn it off. When it fires, the reason is recorded and shown on the meeting page
-so an unexpected ending is explainable.
+#### Why two phrases also work without a name
+
+Requiring a name is the right default and it is also what made the command miss
+in the first real meeting it was used in — a conference room, one microphone,
+several people. From that transcript:
+
+```
+07:55  can you leave the meeting        ← the actual instruction: no name in it
+08:25  Let's see if Nathan leaves        ← "Nishan" heard as "Nathan"
+08:37  Stop recording. Stop recording.   ← plainly aimed at the bot
+09:01  So he stays in the meeting        ← the room noticing it hadn't worked
+```
+
+Three misses, three different causes. The bot ended up leaving on the 2-minute
+stale timeout, three minutes after the last word.
+
+So `LEAVE_COMMAND_NAMELESS=true` (the default) lets a very short list fire with
+no name: **`stop recording`** and **`stop transcribing`**. The bar for that list
+is *a phrase nobody says to another person in a meeting* — which is why "leave
+the meeting" is not on it and never will be. A preceding negation ("don't stop
+recording") is ignored.
+
+Widening the 60-character window was the obvious alternative and it is wrong:
+on this transcript it does produce a match, by stitching "nathan" to a "stop
+recording" said 100 characters later by someone else. The test in
+`test/leave-command.test.ts` pins that transcript so the tradeoff stays visible.
+
+Set `LEAVE_COMMAND_ENABLED=false` to turn the whole thing off,
+`LEAVE_COMMAND_NAMELESS=false` for name-only matching, or leave
+`LEAVE_COMMAND_NAMES` empty for nameless-only. When it fires, the reason is
+recorded and shown on the meeting page so an unexpected ending is explainable.
 
 **Known limitation:** "should we ask Nishan to leave the meeting?" will trigger
 it. Distinguishing a question from an instruction in unpunctuated ASR output is
 not reliably solvable, and the cost is low — the digest is still produced from
 everything captured up to that point, and Vexa keeps the transcript, so
 **Fetch transcript & retry** recovers anything said afterwards.
+
+#### Chat commands are not possible
+
+The obvious fix for bad ASR is to type the command into the meeting chat
+instead. Vexa cannot do this on Google Meet. Its bot has a chat-capture module
+for Jitsi, Teams and Zoom, and none for Meet, so `GET /bots/google_meet/{id}/chat`
+returns `{"messages":[]}` no matter what anyone types. `POST` to the same path
+(sending chat) is declared in Vexa's API contract but explicitly waived as
+unimplemented, and the live cloud answers `405 allow: GET`. Setting a bot avatar
+is unimplemented in the same way. Revisit if Vexa ships the voice/media-agent
+handler ([issue #591](https://github.com/Vexa-ai/vexa/issues/591)).
 
 ### Transcript timestamps
 

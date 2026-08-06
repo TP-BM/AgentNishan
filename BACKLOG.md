@@ -2,6 +2,40 @@
 
 Things worth doing, not yet done.
 
+## Revisit chat commands and bot avatar when Vexa ships them
+
+**Status: blocked on Vexa, verified 2026-08-06.** Both were asked for; neither
+is buildable today. Recording the evidence so it isn't re-derived.
+
+| Want | Route | Live cloud says |
+|---|---|---|
+| Type "Nishan leave" in Meet chat | `GET /bots/google_meet/{id}/chat` | `200 {"messages":[]}` — always |
+| Bot posts an introduction to chat | `POST …/chat` | `405 allow: GET` |
+| Bot profile picture | `PUT …/avatar` | `404` — route not registered |
+
+The read side is empty because Vexa's bot has a chat-capture module for Jitsi
+(`jitsi-chat.ts`), Teams and Zoom, and **none for Google Meet** — the messages
+never leave the call, so no endpoint can return them. The write side is declared
+in Vexa's sealed `api.v1` contract but listed in their own `KNOWN_GAPS.json`:
+"no bot-command (send-to-meeting) backend in the 0.12 core… Registering a 200
+that does nothing would fake the capability." `avatar`, `screen` and `speak` are
+waived the same way.
+
+Two more things worth knowing when this is revisited:
+
+- `POST /bots` accepts `voice_agent_enabled` and `default_avatar_url` with a
+  `201` and **silently drops both** — confirmed with `dry_run: true`, neither
+  appears in the stored `data`. An accepted-but-ignored field is worse than a
+  422, so don't trust acceptance as evidence.
+- Vexa's "avatar" is the bot's *camera-feed* image, not a Google profile
+  picture. The bot joins as an unauthenticated guest, so Meet will always render
+  a letter avatar from `bot_name`. A real profile picture is not achievable at
+  any point.
+
+**Trigger to revisit:** [Vexa issue #591](https://github.com/Vexa-ai/vexa/issues/591)
+(the voice/media-agent carve). The contract is already sealed, so this is a
+handler landing rather than an API redesign.
+
 ## Auto-deploy to Fly on push to `main` (GitHub Action)
 
 **Why.** `fly deploy` ships the local working directory, not the repo. Right now

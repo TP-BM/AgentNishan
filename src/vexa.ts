@@ -265,6 +265,14 @@ export async function checkKeys(): Promise<{ bot: string | null; tx: string | nu
 export interface VexaMeetingDetail {
   status?: string;
   bot_outcome?: string;
+  /** e.g. "awaiting_admission_rejected" — someone denied the bot. */
+  completion_reason?: string;
+  /** Which step failed, e.g. "awaiting_admission". */
+  failure_stage?: string;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" ? value : undefined;
 }
 
 /** Cross-check of meeting state. Returns null if Vexa has nothing useful. */
@@ -284,11 +292,10 @@ export async function getMeetingDetail(
       | undefined;
 
     return {
-      status: typeof result?.["status"] === "string" ? (result["status"] as string) : undefined,
-      bot_outcome:
-        typeof provenance?.["bot_outcome"] === "string"
-          ? (provenance["bot_outcome"] as string)
-          : undefined,
+      status: str(result?.["status"]),
+      bot_outcome: str(provenance?.["bot_outcome"]),
+      completion_reason: str(result?.["completion_reason"]),
+      failure_stage: str(result?.["failure_stage"]),
     };
   } catch (error) {
     // A missing/failed detail lookup must never break the poll loop — the
