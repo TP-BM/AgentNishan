@@ -35,6 +35,7 @@ import {
   STYLES,
   homePage,
   inviteClosedPage,
+  landingPage,
   invitesPage,
   loginPage,
   meetingPage,
@@ -87,9 +88,24 @@ function secretMatches(candidate: string): boolean {
 
 declare module "fastify" {
   interface FastifyRequest {
-    /** Who is asking. Set by the auth hook; every scoped read reads it here. */
-    scope: Scope;
+    /**
+     * Who is asking, or null for an unauthenticated request.
+     *
+     * Nullable on purpose. It used to default to ADMIN, which was harmless
+     * while every route was behind the login — and a trap the moment a public
+     * route existed, because a stranger's request would have arrived carrying
+     * the owner's scope. Null makes that a type error instead.
+     */
+    scope: Scope | null;
   }
+}
+
+/** For routes behind the auth hook, which guarantees a scope. */
+function requireScope(request: import("fastify").FastifyRequest): Scope {
+  if (request.scope === null) {
+    throw new Error("a route reachable without a session read request.scope");
+  }
+  return request.scope;
 }
 
 /**
@@ -116,26 +132,28 @@ function inviteFromCookie(request: import("fastify").FastifyRequest) {
  * function instead of an audit of every route.
  */
 app.addHook("onRequest", async (request, reply) => {
-  request.scope = ADMIN;
-
-  const path = request.url.split("?")[0] ?? "";
-  if (PUBLIC_PATHS.has(path) || path.startsWith("/try/")) return;
-
   const raw = request.cookies[SESSION_COOKIE];
   const unsigned = raw === undefined ? null : request.unsignCookie(raw);
   if (unsigned?.valid === true && unsigned.value === SESSION_VALUE) {
-    // Owner: scope is already ADMIN.
+    request.scope = ADMIN;
   } else {
     const invite = inviteFromCookie(request);
-    if (invite === undefined) return reply.redirect("/login");
-    request.scope = { kind: "invite", token: invite.token };
+    request.scope = invite === undefined ? null : { kind: "invite", token: invite.token };
   }
+
+  // `/` is public but not scope-free: a signed-in visitor gets their meetings
+  // there and a stranger gets the pitch, so the handler branches on scope
+  // rather than the hook turning them away.
+  const path = request.url.split("?")[0] ?? "";
+  if (PUBLIC_PATHS.has(path) || path === "/" || path.startsWith("/try/")) return;
+
+  if (request.scope === null) return reply.redirect("/login");
 
   // Everything under /admin is the owner's, stated once here rather than per
   // route — so a route added later under that prefix cannot be reachable by a
   // demo visitor just because someone forgot a check. Redundant today, since
   // only admin sessions exist; load-bearing the moment invite sessions do.
-  if (request.url.startsWith("/admin") && request.scope.kind !== "admin") {
+  if (request.url.startsWith("/admin") && request.scope?.kind !== "admin") {
     return reply.redirect("/");
   }
 });
@@ -333,13 +351,33 @@ app.post<{ Params: { token: string } }>("/try/:token", async (request, reply) =>
 
 app.get("/", async (request, reply) => {
   const { error, notice } = flashOf(request.query);
+  const scope = request.scope;
+
+  if (scope === null) {
+    return html(reply, landingPage(error));
+  }
+
+  const invite = scope.kind === "invite" ? getInvite(scope.token) : undefined;
   html(
     reply,
-    homePage(listMeetings(request.scope), error, notice, getIdentity(request.scope)),
+    homePage(listMeetings(scope), error, notice, getIdentity(scope), {
+      canDispatch: scope.kind === "admin",
+      resumeToken:
+        invite !== undefined && inviteUsable(invite, Date.now()).usable
+          ? invite.token
+          : null,
+    }),
   );
 });
 
+/**
+ * The owner's own dispatch. Guests never come through here — their bot is sent
+ * by POST /try/:token, which spends the invite first. Without this check an
+ * invite session could sit on this route and send bots forever, since nothing
+ * else in the path counts them.
+ */
 app.post("/meetings", async (request, reply) => {
+  if (requireScope(request).kind !== "admin") return reply.redirect("/");
   const body = (request.body ?? {}) as Record<string, unknown>;
   const input = typeof body["url"] === "string" ? body["url"] : "";
   const nativeMeetingId = parseMeetingId(input);
@@ -369,7 +407,7 @@ app.post("/meetings", async (request, reply) => {
     meetUrl: `https://meet.google.com/${nativeMeetingId}`,
     nativeMeetingId,
     title: nativeMeetingId,
-    scope: request.scope,
+    scope: requireScope(request),
   });
   if (vexaMeetingId !== null) {
     updateMeeting(meeting.id, { vexa_meeting_id: vexaMeetingId });
@@ -379,7 +417,7 @@ app.post("/meetings", async (request, reply) => {
 });
 
 app.get<{ Params: { id: string } }>("/m/:id", async (request, reply) => {
-  const meeting = getMeeting(request.scope, request.params.id);
+  const meeting = getMeeting(requireScope(request), request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -397,7 +435,7 @@ app.get<{ Params: { id: string } }>("/m/:id", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/end", async (request, reply) => {
-  const meeting = getMeeting(request.scope, request.params.id);
+  const meeting = getMeeting(requireScope(request), request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -415,7 +453,7 @@ app.post<{ Params: { id: string } }>("/m/:id/end", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/retry", async (request, reply) => {
-  const meeting = getMeeting(request.scope, request.params.id);
+  const meeting = getMeeting(requireScope(request), request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -433,7 +471,7 @@ app.post<{ Params: { id: string } }>("/m/:id/retry", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/delete", async (request, reply) => {
-  deleteMeeting(request.scope, request.params.id);
+  deleteMeeting(requireScope(request), request.params.id);
   return reply.redirect("/?ok=" + encodeURIComponent("Meeting deleted."));
 });
 
@@ -477,7 +515,7 @@ app.post<{ Params: { token: string } }>(
 
 app.get("/settings", async (request, reply) => {
   const { error, notice } = flashOf(request.query);
-  html(reply, settingsPage(getIdentity(request.scope), error, notice));
+  html(reply, settingsPage(getIdentity(requireScope(request)), error, notice));
 });
 
 app.post("/settings", async (request, reply) => {

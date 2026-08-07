@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { MeetingRow, DigestRow, SegmentRow, Identity } from "./db.ts";
 import type { ActionItem, Decision } from "./digest.ts";
 import { formatInviteToken, inviteUsable, type Invite } from "./invite.ts";
@@ -116,6 +117,25 @@ textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
 form.demo input, form.demo textarea { width: 100%; }
 form.demo button { width: 100%; margin-top: 24px; padding: 13px; font-size: 16px; }
 .closed { max-width: 420px; margin: 12vh auto; text-align: center; }
+.pitch { max-width: 560px; margin: 8vh auto 0; }
+.pitch h1 { font-size: 30px; letter-spacing: -0.02em; margin-bottom: 10px; }
+.pitch .lede { font-size: 17px; color: var(--muted); margin: 0 0 30px; }
+.pitch form { display: flex; gap: 8px; }
+.pitch input { text-transform: uppercase; letter-spacing: .08em; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.sample { border: 1px solid var(--line); border-radius: 12px; padding: 20px; margin-top: 14px; }
+.sample .tag {
+  display: inline-block; font-size: 11px; font-weight: 700; letter-spacing: .08em;
+  text-transform: uppercase; color: var(--muted); border: 1px solid var(--line);
+  border-radius: 999px; padding: 3px 9px; margin-bottom: 14px;
+}
+.steps { list-style: none; padding: 0; margin: 0 0 30px; counter-reset: step; }
+.steps li { position: relative; padding-left: 30px; margin-bottom: 10px; color: var(--muted); }
+.steps li::before {
+  counter-increment: step; content: counter(step);
+  position: absolute; left: 0; top: 1px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--card); border: 1px solid var(--line); color: var(--fg);
+  font-size: 11px; font-weight: 700; display: grid; place-items: center;
+}
 /* Pulse next to a live status line, so an auto-refreshing page reads as alive. */
 .live-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -158,6 +178,20 @@ h1, .title, .summary, blockquote, .card .task, .turn p { overflow-wrap: anywhere
 }
 `;
 
+/**
+ * Cache-buster for the stylesheet, derived from the stylesheet itself.
+ *
+ * /styles.css is served with a long max-age, which is right — it barely
+ * changes. But without this, a CSS change ships and every browser that has
+ * already seen the old sheet keeps it for an hour, so a deploy appears to have
+ * rendered the app broken. Hashing the content means the URL changes exactly
+ * when the content does, and never otherwise.
+ */
+export const STYLES_VERSION = createHash("sha256")
+  .update(STYLES)
+  .digest("hex")
+  .slice(0, 8);
+
 export function layout(
   title: string,
   body: string,
@@ -172,7 +206,7 @@ export function layout(
 <meta name="viewport" content="width=device-width,initial-scale=1">
 ${refreshSeconds === undefined ? "" : `<meta http-equiv="refresh" content="${refreshSeconds}">`}
 <title>${escapeHtml(title)}</title>
-<link rel="stylesheet" href="/styles.css">
+<link rel="stylesheet" href="/styles.css?v=${STYLES_VERSION}">
 </head>
 <body>
 <div class="wrap">
@@ -229,20 +263,30 @@ ${flash(error, "")}
   );
 }
 
+export interface HomeOptions {
+  /** Owner only. A guest's bot is sent by the invite flow, which counts it. */
+  canDispatch: boolean;
+  /** A guest whose invite still has a run left, so they can start another. */
+  resumeToken: string | null;
+}
+
 export function homePage(
   meetings: MeetingRow[],
   error: string,
   notice: string,
   identity: Identity,
+  options: HomeOptions = { canDispatch: true, resumeToken: null },
 ): string {
   const setupWarning =
-    identity.displayName === ""
+    options.canDispatch && identity.displayName === ""
       ? `<div class="flash err">No name set yet, so nothing can be flagged as <em>your</em> action item. <a href="/settings">Add it in settings</a>.</div>`
       : "";
 
   const list =
     meetings.length === 0
-      ? `<p class="empty">No meetings yet. Paste a Meet link above when you know you'll miss one.</p>`
+      ? options.canDispatch
+        ? `<p class="empty">No meetings yet. Paste a Meet link above when you know you'll miss one.</p>`
+        : `<p class="empty">Nothing here yet.</p>`
       : `<ul class="meetings">${meetings
           .map(
             (m) => `<li><a href="/m/${m.id}">
@@ -253,17 +297,23 @@ export function homePage(
           )
           .join("")}</ul>`;
 
-  return layout(
-    "MeetNish",
-    `${flash(error, notice)}${setupWarning}
-<form class="paste" method="post" action="/meetings">
+  const dispatch = options.canDispatch
+    ? `<form class="paste" method="post" action="/meetings">
   <input type="text" name="url" placeholder="https://meet.google.com/abc-defg-hij" autofocus required>
   <button type="submit">Send bot</button>
 </form>
-<p class="hint">The bot joins immediately and waits in the lobby until someone admits it.</p>
+<p class="hint">The bot joins immediately and waits in the lobby until someone admits it.</p>`
+    : options.resumeToken !== null
+      ? `<p class="hint"><a href="/try/${encodeURIComponent(options.resumeToken)}">Send another notetaker →</a></p>`
+      : "";
+
+  return layout(
+    "MeetNish",
+    `${flash(error, notice)}${setupWarning}
+${dispatch}
 <h2>Meetings</h2>
 ${list}`,
-    true,
+    options.canDispatch,
     meetings.some((m) => m.status !== "done" && m.status !== "failed") ? 15 : undefined,
   );
 }
@@ -555,6 +605,72 @@ export function inviteClosedPage(reason: string): string {
     `<div class="closed">
 <h1 style="margin-bottom:12px">MeetNish</h1>
 <p>${escapeHtml(reason)}</p>
+</div>`,
+    false,
+  );
+}
+
+/**
+ * What a stranger sees at the root.
+ *
+ * There is no signup, so the page has one job beyond explaining itself: take a
+ * code. The link is the usual way in, and the field is the fallback for every
+ * way a link fails to survive the trip — truncated in a chat preview, wrapped
+ * in an email, read aloud off someone's screen.
+ *
+ * The sample digest is the pitch. Describing the output convinces nobody;
+ * showing it costs one synthetic example and no invite.
+ */
+export function landingPage(error: string): string {
+  const sample: Decision = {
+    decision: "Ship the CSV importer behind a flag for the March release",
+    rationale: "The parser is done but the error reporting isn't, and support can't triage it yet",
+    owner: "Priya",
+    evidence_quote: "let's put it behind a flag and turn it on for the pilot accounts first",
+  };
+  const mine: ActionItem = {
+    owner: "Marcus",
+    task: "Write the migration note for existing importer users",
+    due: "before the release cut",
+    is_mine: true,
+    evidence_quote: "marcus can you take the migration note, before we cut the release",
+  };
+
+  return layout(
+    "MeetNish — a notetaker for the meetings you miss",
+    `<div class="pitch">
+<h1>Send a notetaker to the meeting you're missing</h1>
+<p class="lede">It joins, listens, and emails you what was decided and what landed on
+your plate — with a quote from the transcript for every line, so you can check it.</p>
+
+${flash(error, "")}
+
+<ol class="steps">
+  <li>Paste the meeting link and your email.</li>
+  <li>Someone in the meeting admits the bot from the lobby.</li>
+  <li>The digest arrives when the meeting ends.</li>
+</ol>
+
+<h2>Have an invite code?</h2>
+<form method="post" action="/code">
+  <input type="text" name="code" placeholder="4K2P-9WXM" maxlength="12" autocomplete="off"
+         spellcheck="false" autofocus required aria-label="Invite code">
+  <button type="submit">Go</button>
+</form>
+<p class="hint" style="margin-top:8px">MeetNish is invite-only while it's being tried out.
+Ask Thilina for a code.</p>
+
+<h2>What you get</h2>
+<div class="sample">
+  <span class="tag">Example</span>
+  <p class="summary">The team agreed to ship the CSV importer behind a feature flag for
+  March, and to hold the bulk-edit work until after the release.</p>
+  <h2>Decisions</h2>
+  ${decisionCard(sample)}
+  <h2>Your action items</h2>
+  ${actionCard(mine, false)}
+</div>
+<p class="hint" style="margin-top:24px"><a href="/login">Owner login</a></p>
 </div>`,
     false,
   );
