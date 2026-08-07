@@ -1,5 +1,6 @@
 import { config } from "./config.ts";
 import {
+  ADMIN,
   activeMeetings,
   countSegments,
   getIdentity,
@@ -8,6 +9,7 @@ import {
   interruptedMeetings,
   saveDigest,
   updateMeeting,
+  scopeOf,
   upsertSegments,
   type MeetingRow,
 } from "./db.ts";
@@ -268,7 +270,7 @@ async function failNotAdmitted(
 
   await stopBot(meeting.native_meeting_id).catch(() => {});
 
-  const identity = getIdentity();
+  const identity = getIdentity(scopeOf(meeting));
   if (identity.email === "") return;
 
   const message = notAdmittedEmail(
@@ -286,7 +288,7 @@ async function failNotAdmitted(
 
 /** End the meeting and produce the digest. Safe to call from the UI too. */
 export async function finalise(meetingId: string, reason: string): Promise<void> {
-  const meeting = getMeeting(meetingId);
+  const meeting = getMeeting(ADMIN, meetingId);
   if (meeting === undefined) return;
 
   console.log(`[poll] finalising ${meetingId}: ${reason}`);
@@ -316,7 +318,7 @@ export async function finalise(meetingId: string, reason: string): Promise<void>
  * scope, an outage mid-poll) can be recovered in full afterwards.
  */
 export async function refetchAndDigest(meetingId: string): Promise<void> {
-  const meeting = getMeeting(meetingId);
+  const meeting = getMeeting(ADMIN, meetingId);
   if (meeting === undefined) return;
 
   updateMeeting(meetingId, { status: "transcribing", error: null });
@@ -343,7 +345,7 @@ export async function refetchAndDigest(meetingId: string): Promise<void> {
 
 /** Generate + save + email the digest. Exposed so the UI can retry it. */
 export async function runDigest(meetingId: string): Promise<void> {
-  const meeting = getMeeting(meetingId);
+  const meeting = getMeeting(ADMIN, meetingId);
   if (meeting === undefined) return;
 
   const segments = getSegments(meetingId);
@@ -360,7 +362,7 @@ export async function runDigest(meetingId: string): Promise<void> {
 
   updateMeeting(meetingId, { status: "transcribing", error: null });
 
-  const identity = getIdentity();
+  const identity = getIdentity(scopeOf(meeting));
   let result;
   try {
     result = await generateDigest(toPlainText(segments), identity, meeting.title);

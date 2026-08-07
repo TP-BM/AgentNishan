@@ -4,6 +4,7 @@ import cookie from "@fastify/cookie";
 import formbody from "@fastify/formbody";
 import { config } from "./config.ts";
 import {
+  ADMIN,
   createMeeting,
   db,
   deleteMeeting,
@@ -14,6 +15,7 @@ import {
   listMeetings,
   setSetting,
   updateMeeting,
+  type Scope,
 } from "./db.ts";
 import { parseMeetingId } from "./meet-url.ts";
 import { finalise, refetchAndDigest, startPoller, stopPoller } from "./poller.ts";
@@ -43,7 +45,23 @@ function secretMatches(candidate: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+declare module "fastify" {
+  interface FastifyRequest {
+    /** Who is asking. Set by the auth hook; every scoped read reads it here. */
+    scope: Scope;
+  }
+}
+
+/**
+ * Resolve who is asking, once, before any handler runs.
+ *
+ * Handlers take the scope off the request rather than assuming admin, so
+ * granting a second kind of caller (a demo invite) is a branch in this one
+ * function instead of an audit of every route.
+ */
 app.addHook("onRequest", async (request, reply) => {
+  request.scope = ADMIN;
+
   if (PUBLIC_PATHS.has(request.url.split("?")[0] ?? "")) return;
 
   const raw = request.cookies[SESSION_COOKIE];
@@ -111,7 +129,10 @@ app.get("/logout", async (_request, reply) => {
 
 app.get("/", async (request, reply) => {
   const { error, notice } = flashOf(request.query);
-  html(reply, homePage(listMeetings(), error, notice, getIdentity()));
+  html(
+    reply,
+    homePage(listMeetings(request.scope), error, notice, getIdentity(request.scope)),
+  );
 });
 
 app.post("/meetings", async (request, reply) => {
@@ -144,6 +165,7 @@ app.post("/meetings", async (request, reply) => {
     meetUrl: `https://meet.google.com/${nativeMeetingId}`,
     nativeMeetingId,
     title: nativeMeetingId,
+    scope: request.scope,
   });
   if (vexaMeetingId !== null) {
     updateMeeting(meeting.id, { vexa_meeting_id: vexaMeetingId });
@@ -153,7 +175,7 @@ app.post("/meetings", async (request, reply) => {
 });
 
 app.get<{ Params: { id: string } }>("/m/:id", async (request, reply) => {
-  const meeting = getMeeting(request.params.id);
+  const meeting = getMeeting(request.scope, request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -171,7 +193,7 @@ app.get<{ Params: { id: string } }>("/m/:id", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/end", async (request, reply) => {
-  const meeting = getMeeting(request.params.id);
+  const meeting = getMeeting(request.scope, request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -189,7 +211,7 @@ app.post<{ Params: { id: string } }>("/m/:id/end", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/retry", async (request, reply) => {
-  const meeting = getMeeting(request.params.id);
+  const meeting = getMeeting(request.scope, request.params.id);
   if (meeting === undefined) {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
@@ -207,7 +229,7 @@ app.post<{ Params: { id: string } }>("/m/:id/retry", async (request, reply) => {
 });
 
 app.post<{ Params: { id: string } }>("/m/:id/delete", async (request, reply) => {
-  deleteMeeting(request.params.id);
+  deleteMeeting(request.scope, request.params.id);
   return reply.redirect("/?ok=" + encodeURIComponent("Meeting deleted."));
 });
 
@@ -215,7 +237,7 @@ app.post<{ Params: { id: string } }>("/m/:id/delete", async (request, reply) => 
 
 app.get("/settings", async (request, reply) => {
   const { error, notice } = flashOf(request.query);
-  html(reply, settingsPage(getIdentity(), error, notice));
+  html(reply, settingsPage(getIdentity(request.scope), error, notice));
 });
 
 app.post("/settings", async (request, reply) => {
