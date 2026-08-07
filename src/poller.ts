@@ -270,8 +270,10 @@ async function failNotAdmitted(
 
   await stopBot(meeting.native_meeting_id).catch(() => {});
 
+  // A demo meeting carries its own address; the owner's lives in settings.
   const identity = getIdentity(scopeOf(meeting));
-  if (identity.email === "") return;
+  const to = meeting.notify_email ?? identity.email;
+  if (to === "") return;
 
   const message = notAdmittedEmail(
     meeting.meet_url,
@@ -279,7 +281,7 @@ async function failNotAdmitted(
     denied,
   );
   try {
-    await mailer().send({ to: identity.email, ...message });
+    await mailer().send({ to, ...message });
     updateMeeting(meeting.id, { emailed_at: Date.now() });
   } catch (error) {
     console.error("[mail] not-admitted notice failed:", (error as Error).message);
@@ -365,7 +367,12 @@ export async function runDigest(meetingId: string): Promise<void> {
   const identity = getIdentity(scopeOf(meeting));
   let result;
   try {
-    result = await generateDigest(toPlainText(segments), identity, meeting.title);
+    result = await generateDigest(
+      toPlainText(segments),
+      identity,
+      meeting.title,
+      meeting.objective ?? "",
+    );
   } catch (error) {
     console.error(`[digest] ${meetingId} failed:`, (error as Error).message);
     updateMeeting(meetingId, {
@@ -398,7 +405,8 @@ export async function runDigest(meetingId: string): Promise<void> {
 
   // The digest is already saved and visible in the app. A failed send is a
   // missing notification, not a lost meeting.
-  if (identity.email === "") {
+  const to = meeting.notify_email ?? identity.email;
+  if (to === "") {
     console.warn("[mail] no notify address configured, skipping digest email");
     return;
   }
@@ -406,7 +414,7 @@ export async function runDigest(meetingId: string): Promise<void> {
   try {
     const body = digestEmail(digest, `${config.baseUrl}/m/${meetingId}`);
     await mailer().send({
-      to: identity.email,
+      to,
       subject: digestSubject(digest),
       ...body,
     });

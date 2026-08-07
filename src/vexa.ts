@@ -114,12 +114,22 @@ async function request(
   }
 }
 
-/** Ask Vexa to send a bot into a Google Meet. Returns Vexa's internal meeting id if it gives one. */
-export async function sendBot(nativeMeetingId: string): Promise<string | null> {
+/**
+ * Ask Vexa to send a bot into a Google Meet. Returns Vexa's internal meeting id
+ * if it gives one.
+ *
+ * `botName` is per request because it is what everyone in the room sees in the
+ * participant list — it is how the bot announces itself, so a demo run should
+ * be able to say whose it is rather than inheriting the owner's name.
+ */
+export async function sendBot(
+  nativeMeetingId: string,
+  botName = config.vexa.botName,
+): Promise<string | null> {
   const result = (await request("bot", "POST", "/bots", {
     platform: "google_meet",
     native_meeting_id: nativeMeetingId,
-    bot_name: config.vexa.botName,
+    bot_name: botName,
     language: config.vexa.language,
     task: "transcribe",
     transcribe_enabled: true,

@@ -36,6 +36,12 @@ export interface MeetingRow {
   invite_id: string | null;
   /** When the bot was first seen past the lobby — the demo clock starts here. */
   admitted_at: number | null;
+  /** Where this meeting's digest goes. Null falls back to the owner's setting. */
+  notify_email: string | null;
+  /** What the requester asked the digest to focus on. */
+  objective: string | null;
+  /** Name the bot joined under, so the participant list matches what was asked for. */
+  bot_name: string | null;
 }
 
 /**
@@ -180,6 +186,18 @@ ensureColumn("meetings", "invite_id", "TEXT");
 // spend their whole allowance in the waiting room.
 ensureColumn("meetings", "admitted_at", "INTEGER");
 
+// Set from the demo form. The owner's address lives in settings and covers
+// their own meetings; a visitor's belongs to the meeting they asked for, not to
+// any persistent account, because there isn't one.
+ensureColumn("meetings", "notify_email", "TEXT");
+
+// Free text from the form, threaded into the digest prompt.
+ensureColumn("meetings", "objective", "TEXT");
+
+// Per-meeting bot name. Vexa takes it per request, and it is what everyone in
+// the room reads in the participant list — so it is the disclosure, not decoration.
+ensureColumn("meetings", "bot_name", "TEXT");
+
 export function newId(): string {
   return randomBytes(6).toString("hex");
 }
@@ -247,13 +265,27 @@ export function createMeeting(input: {
   nativeMeetingId: string;
   title: string;
   scope: Scope;
+  notifyEmail?: string | null;
+  objective?: string | null;
+  botName?: string | null;
 }): MeetingRow {
   const id = newId();
   const inviteId = input.scope.kind === "invite" ? input.scope.token : null;
   db.prepare(
-    `INSERT INTO meetings (id, meet_url, native_meeting_id, title, status, created_at, invite_id)
-     VALUES (?, ?, ?, ?, 'dispatched', ?, ?)`,
-  ).run(id, input.meetUrl, input.nativeMeetingId, input.title, Date.now(), inviteId);
+    `INSERT INTO meetings (id, meet_url, native_meeting_id, title, status, created_at,
+                           invite_id, notify_email, objective, bot_name)
+     VALUES (?, ?, ?, ?, 'dispatched', ?, ?, ?, ?, ?)`,
+  ).run(
+    id,
+    input.meetUrl,
+    input.nativeMeetingId,
+    input.title,
+    Date.now(),
+    inviteId,
+    input.notifyEmail ?? null,
+    input.objective ?? null,
+    input.botName ?? null,
+  );
   return getMeeting(input.scope, id)!;
 }
 
@@ -363,6 +395,13 @@ export function listInvites(): Invite[] {
  * beforehand, so two simultaneous submissions on the same link can't both pass
  * a read-then-write check and get two bots. Returns whether it succeeded.
  */
+export function refundInvite(token: string): void {
+  db.prepare(
+    `UPDATE invites SET meetings_used = meetings_used - 1
+     WHERE token = ? AND meetings_used > 0`,
+  ).run(token);
+}
+
 export function consumeInvite(token: string): boolean {
   const result = db
     .prepare(

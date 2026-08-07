@@ -142,6 +142,7 @@ function buildUserMessage(
   identity: Identity,
   transcript: string,
   meetingTitle: string,
+  objective: string,
 ): string {
   const names = identityNames(identity);
   const identityLine =
@@ -154,6 +155,14 @@ function buildUserMessage(
 The user was NOT in this meeting — a notetaker bot attended in their place. Anything assigned to them was assigned in their absence.
 
 Meeting label (may just be the meeting code, ignore it if uninformative): ${meetingTitle}
+${
+  objective.trim() === ""
+    ? ""
+    : `
+What the user asked you to watch for: ${objective.trim()}
+Cover it if the meeting touched on it, and say so plainly if it did not. This steers emphasis — it does not narrow the digest, so still report decisions and action items outside it.
+`
+}
 
 Transcript:
 ---
@@ -186,6 +195,7 @@ export async function generateDigest(
   transcript: string,
   identity: Identity,
   meetingTitle: string,
+  objective = "",
 ): Promise<DigestResult> {
   if (transcript.trim() === "") {
     throw new Error("Transcript is empty — nothing to summarise.");
@@ -201,7 +211,10 @@ export async function generateDigest(
     },
     system: SYSTEM_PROMPT,
     messages: [
-      { role: "user", content: buildUserMessage(identity, transcript, meetingTitle) },
+      {
+        role: "user",
+        content: buildUserMessage(identity, transcript, meetingTitle, objective),
+      },
     ],
   });
 

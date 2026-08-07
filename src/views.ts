@@ -99,6 +99,23 @@ details.transcript summary { cursor: pointer; color: var(--muted); font-size: 14
 label { display: block; font-weight: 600; font-size: 14px; margin: 18px 0 6px; }
 label + .hint { margin: -2px 0 0; }
 .login { max-width: 360px; margin: 12vh auto; }
+textarea {
+  width: 100%; padding: 11px 13px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--fg); resize: vertical; min-height: 72px;
+  /* Separate properties, not the font shorthand: inherit is not a valid family
+     inside it, so the whole declaration is dropped and a textarea falls back to
+     the UA default, which is monospace. */
+  font-family: inherit; font-size: 15px; line-height: 1.5;
+}
+textarea:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+.optional { font-weight: 400; color: var(--muted); text-transform: none; letter-spacing: 0; }
+.two-up { display: flex; gap: 12px; }
+.two-up > * { flex: 1; min-width: 0; }
+/* The shared input rule uses flex:1, which sizes correctly inside form.paste
+   and does nothing at all in a stacked form — leaving default-width boxes. */
+form.demo input, form.demo textarea { width: 100%; }
+form.demo button { width: 100%; margin-top: 24px; padding: 13px; font-size: 16px; }
+.closed { max-width: 420px; margin: 12vh auto; text-align: center; }
 /* Pulse next to a live status line, so an auto-refreshing page reads as alive. */
 .live-dot {
   display: inline-block; width: 7px; height: 7px; border-radius: 50%;
@@ -114,6 +131,10 @@ h1, .title, .summary, blockquote, .card .task, .turn p { overflow-wrap: anywhere
 
 @media (max-width: 640px) {
   .wrap { padding: 20px 16px 64px; }
+
+  /* Two fields side by side is already tight at 375px once labels wrap. */
+  .two-up { flex-direction: column; gap: 0; }
+  textarea { font-size: 16px; }
 
   /* Stack the title above the nav; three links don't fit beside it. */
   header { flex-direction: column; align-items: flex-start; gap: 10px; margin-bottom: 20px; }
@@ -473,5 +494,68 @@ export function invitesPage(
 what the digest attributes their action items to, so use the one they go by in meetings.</p>
 <h2>Invites</h2>
 ${list}`,
+  );
+}
+
+/**
+ * The demo form a friend lands on. Their invite is already established by the
+ * time this renders — the link was the login — so it asks only what the run
+ * itself needs, and not who they are: the invite label already says that.
+ */
+export function tryPage(invite: Invite, error: string, notice: string): string {
+  const minutes = Math.round(invite.max_duration_ms / 60000);
+
+  return layout(
+    "Send your notetaker — MeetNish",
+    `<div class="login" style="max-width:520px">
+<h1 style="margin-bottom:6px">Send your notetaker</h1>
+<p class="hint" style="margin-bottom:24px">Hello ${escapeHtml(invite.label)} — it joins the meeting,
+listens for up to ${minutes} minutes, then emails you the decisions and your action items.</p>
+${flash(error, notice)}
+<form class="demo" method="post" action="/try/${encodeURIComponent(invite.token)}">
+  <label for="email">Email</label>
+  <input id="email" type="email" name="email" placeholder="you@example.com" required>
+  <p class="hint" style="margin-top:4px">Where the digest goes. Nothing else is sent here.</p>
+
+  <label for="url">Meeting link</label>
+  <input id="url" type="text" name="url" placeholder="https://meet.google.com/abc-defg-hij" required>
+  <p class="hint" style="margin-top:4px">Google Meet only for now.</p>
+
+  <div class="two-up">
+    <div>
+      <label for="title">Meeting name <span class="optional">(optional)</span></label>
+      <input id="title" type="text" name="title" placeholder="e.g. Q1 planning">
+    </div>
+    <div>
+      <label for="bot_name">Bot name</label>
+      <input id="bot_name" type="text" name="bot_name"
+             value="${escapeHtml(`${invite.label}'s notetaker`)}" maxlength="60" required>
+    </div>
+  </div>
+  <p class="hint" style="margin-top:4px">Everyone in the meeting sees the bot name in the
+  participant list — that is how it announces itself, so keep it recognisable.</p>
+
+  <label for="objective">What should it focus on? <span class="optional">(optional)</span></label>
+  <textarea id="objective" name="objective" maxlength="500"
+            placeholder="e.g. pricing details, action items, technical requirements…"></textarea>
+
+  <button type="submit">Send the notetaker</button>
+</form>
+<p class="hint" style="margin-top:20px">Someone already in the meeting has to admit it from the
+lobby — it cannot let itself in. Anyone can say <em>&ldquo;stop recording&rdquo;</em> to send it away.</p>
+</div>`,
+    false,
+  );
+}
+
+/** An invite that has been spent, revoked or never existed. All look alike. */
+export function inviteClosedPage(reason: string): string {
+  return layout(
+    "Invite closed — MeetNish",
+    `<div class="closed">
+<h1 style="margin-bottom:12px">MeetNish</h1>
+<p>${escapeHtml(reason)}</p>
+</div>`,
+    false,
   );
 }

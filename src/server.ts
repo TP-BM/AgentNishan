@@ -5,32 +5,41 @@ import formbody from "@fastify/formbody";
 import { config } from "./config.ts";
 import {
   ADMIN,
+  consumeInvite,
   createInvite,
   createMeeting,
   db,
   deleteMeeting,
   getDigest,
   getIdentity,
+  getInvite,
   getMeeting,
   getSegments,
   listInvites,
   listMeetings,
+  refundInvite,
   revokeInvite,
   setSetting,
   updateMeeting,
   type Scope,
 } from "./db.ts";
-import { formatInviteToken } from "./invite.ts";
+import {
+  formatInviteToken,
+  inviteUsable,
+  normaliseInviteToken,
+} from "./invite.ts";
 import { parseMeetingId } from "./meet-url.ts";
 import { finalise, refetchAndDigest, startPoller, stopPoller } from "./poller.ts";
 import { checkKeys, sendBot, VexaError } from "./vexa.ts";
 import {
   STYLES,
   homePage,
+  inviteClosedPage,
   invitesPage,
   loginPage,
   meetingPage,
   settingsPage,
+  tryPage,
 } from "./views.ts";
 
 const app = Fastify({ logger: false });
@@ -42,7 +51,33 @@ const SESSION_VALUE = createHash("sha256")
   .update(`session:${config.appSecret}`)
   .digest("hex");
 
-const PUBLIC_PATHS = new Set(["/login", "/healthz", "/styles.css"]);
+const PUBLIC_PATHS = new Set(["/login", "/healthz", "/styles.css", "/code"]);
+
+/**
+ * A demo visitor's session. Separate cookie from the owner's, so the two can
+ * coexist in one browser — you can hold an invite open in a tab while still
+ * being logged in as yourself, which is how this gets tested.
+ */
+const INVITE_COOKIE = "mn_invite";
+
+/**
+ * Guessing an 8-character token is hopeless, but guesses are cheap, so cap the
+ * typed-code route. In-memory is right at this scale: it resets on deploy, and
+ * the thing it protects is not a secret worth more than that.
+ */
+const codeAttempts = new Map<string, { count: number; resetAt: number }>();
+const CODE_LIMIT = 10;
+const CODE_WINDOW_MS = 60 * 60 * 1000;
+
+function tooManyCodeAttempts(ip: string, now = Date.now()): boolean {
+  const entry = codeAttempts.get(ip);
+  if (entry === undefined || now >= entry.resetAt) {
+    codeAttempts.set(ip, { count: 1, resetAt: now + CODE_WINDOW_MS });
+    return false;
+  }
+  entry.count += 1;
+  return entry.count > CODE_LIMIT;
+}
 
 function secretMatches(candidate: string): boolean {
   const a = createHash("sha256").update(candidate).digest();
@@ -58,6 +93,22 @@ declare module "fastify" {
 }
 
 /**
+ * The invite a request carries, if any.
+ *
+ * Deliberately does NOT check `inviteUsable`: a spent invite must still be able
+ * to read the meeting it produced. Usability gates *starting* a run; the cookie
+ * grants *seeing* what that run made. Conflating the two would hand someone a
+ * digest link that stops working the moment their one meeting is used up.
+ */
+function inviteFromCookie(request: import("fastify").FastifyRequest) {
+  const raw = request.cookies[INVITE_COOKIE];
+  if (raw === undefined) return undefined;
+  const unsigned = request.unsignCookie(raw);
+  if (unsigned.valid !== true || unsigned.value === null) return undefined;
+  return getInvite(unsigned.value);
+}
+
+/**
  * Resolve who is asking, once, before any handler runs.
  *
  * Handlers take the scope off the request rather than assuming admin, so
@@ -67,12 +118,17 @@ declare module "fastify" {
 app.addHook("onRequest", async (request, reply) => {
   request.scope = ADMIN;
 
-  if (PUBLIC_PATHS.has(request.url.split("?")[0] ?? "")) return;
+  const path = request.url.split("?")[0] ?? "";
+  if (PUBLIC_PATHS.has(path) || path.startsWith("/try/")) return;
 
   const raw = request.cookies[SESSION_COOKIE];
   const unsigned = raw === undefined ? null : request.unsignCookie(raw);
-  if (unsigned?.valid !== true || unsigned.value !== SESSION_VALUE) {
-    return reply.redirect("/login");
+  if (unsigned?.valid === true && unsigned.value === SESSION_VALUE) {
+    // Owner: scope is already ADMIN.
+  } else {
+    const invite = inviteFromCookie(request);
+    if (invite === undefined) return reply.redirect("/login");
+    request.scope = { kind: "invite", token: invite.token };
   }
 
   // Everything under /admin is the owner's, stated once here rather than per
@@ -136,6 +192,141 @@ app.post("/login", async (request, reply) => {
 app.get("/logout", async (_request, reply) => {
   reply.clearCookie(SESSION_COOKIE, { path: "/" });
   return reply.redirect("/login");
+});
+
+// --- demo invites (public) ---------------------------------------------------
+
+/**
+ * Someone typed a code instead of following a link — the same value, entered
+ * the other way. Normalising here means a code read off a screen ("that's an
+ * ell, or a one?") still lands on the right invite.
+ */
+app.post("/code", async (request, reply) => {
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  const typed = typeof body["code"] === "string" ? body["code"] : "";
+  const token = normaliseInviteToken(typed);
+
+  if (tooManyCodeAttempts(request.ip)) {
+    return reply
+      .code(429)
+      .type("text/html; charset=utf-8")
+      .send(inviteClosedPage("Too many attempts. Try again in an hour."));
+  }
+  if (token === "") {
+    return reply.redirect("/login");
+  }
+  return reply.redirect(`/try/${encodeURIComponent(token)}`);
+});
+
+app.get<{ Params: { token: string } }>("/try/:token", async (request, reply) => {
+  const token = normaliseInviteToken(request.params.token);
+  const invite = getInvite(token);
+
+  // One message for "spent", "revoked" and "never existed" — a stranger poking
+  // at tokens learns nothing from the difference.
+  if (invite === undefined) {
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(inviteClosedPage("That invite link isn't valid. Ask Thilina for a new one."));
+  }
+  const verdict = inviteUsable(invite, Date.now());
+  if (!verdict.usable) {
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(inviteClosedPage(verdict.reason));
+  }
+
+  reply.setCookie(INVITE_COOKIE, invite.token, {
+    signed: true,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: config.baseUrl.startsWith("https://"),
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
+
+  const { error, notice } = flashOf(request.query);
+  html(reply, tryPage(invite, error, notice));
+});
+
+app.post<{ Params: { token: string } }>("/try/:token", async (request, reply) => {
+  const token = normaliseInviteToken(request.params.token);
+  const invite = getInvite(token);
+  const back = (message: string): string =>
+    `/try/${encodeURIComponent(token)}?err=${encodeURIComponent(message)}`;
+
+  if (invite === undefined) {
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(inviteClosedPage("That invite link isn't valid. Ask Thilina for a new one."));
+  }
+
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  const str = (key: string): string =>
+    typeof body[key] === "string" ? (body[key] as string).trim() : "";
+
+  const email = str("email");
+  if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
+    return reply.redirect(back("That email address doesn't look right."));
+  }
+
+  const nativeMeetingId = parseMeetingId(str("url"));
+  if (nativeMeetingId === null) {
+    return reply.redirect(
+      back(
+        "That doesn't look like a Google Meet link. Expected something like https://meet.google.com/abc-defg-hij",
+      ),
+    );
+  }
+
+  // Spend the invite *before* dispatching, and refund on failure. The guard
+  // lives in the UPDATE, so two submissions of the same link race to one
+  // winner rather than both passing a read-then-write check and sending two
+  // bots. A refund on a Vexa error is cheaper than burning someone's one go.
+  if (!consumeInvite(invite.token)) {
+    return reply
+      .type("text/html; charset=utf-8")
+      .send(
+        inviteClosedPage("This invite has already been used. Ask Thilina for a new one."),
+      );
+  }
+
+  const botName = str("bot_name") === "" ? config.vexa.botName : str("bot_name");
+  let vexaMeetingId: string | null = null;
+  try {
+    vexaMeetingId = await sendBot(nativeMeetingId, botName);
+  } catch (error) {
+    refundInvite(invite.token);
+    const message =
+      error instanceof VexaError
+        ? error.friendly()
+        : `Could not reach Vexa: ${(error as Error).message}`;
+    return reply.redirect(back(message));
+  }
+
+  const scope: Scope = { kind: "invite", token: invite.token };
+  const meeting = createMeeting({
+    meetUrl: `https://meet.google.com/${nativeMeetingId}`,
+    nativeMeetingId,
+    title: str("title") === "" ? nativeMeetingId : str("title"),
+    scope,
+    notifyEmail: email,
+    objective: str("objective") === "" ? null : str("objective"),
+    botName,
+  });
+  if (vexaMeetingId !== null) {
+    updateMeeting(meeting.id, { vexa_meeting_id: vexaMeetingId });
+  }
+
+  reply.setCookie(INVITE_COOKIE, invite.token, {
+    signed: true,
+    httpOnly: true,
+    sameSite: "lax",
+    secure: config.baseUrl.startsWith("https://"),
+    path: "/",
+    maxAge: 60 * 60 * 24 * 7,
+  });
+  return reply.redirect(`/m/${meeting.id}`);
 });
 
 // --- meetings ----------------------------------------------------------------
