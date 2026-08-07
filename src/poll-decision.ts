@@ -49,6 +49,27 @@ export type PollDecision =
   | { action: "not-admitted" }
   | { action: "timeout-no-transcript" };
 
+/**
+ * How long the meeting has been running, for the duration ceiling.
+ *
+ * Measured from admission where we have it, not from dispatch. The two are the
+ * same for the owner's own meetings, where the ceiling is three hours and the
+ * difference is noise. They are not the same for a ten-minute demo: a
+ * first-timer hunting for the Admit button can spend several minutes in the
+ * lobby, and charging that to their allowance means the bot leaves almost as
+ * soon as it arrives.
+ *
+ * Falls back to dispatch while the bot is still in the lobby, so a bot nobody
+ * ever admits is still bounded — the admission timeout normally gets there
+ * first, but the ceiling must not depend on that.
+ */
+export function elapsedMs(
+  meeting: { created_at: number; admitted_at: number | null },
+  now: number,
+): number {
+  return now - (meeting.admitted_at ?? meeting.created_at);
+}
+
 /** The parts of Vexa's meeting record that say how admission went. */
 export interface AdmissionDetail {
   status?: string | undefined;

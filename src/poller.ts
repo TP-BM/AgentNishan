@@ -4,6 +4,7 @@ import {
   activeMeetings,
   countSegments,
   getIdentity,
+  getInvite,
   getMeeting,
   getSegments,
   interruptedMeetings,
@@ -16,7 +17,7 @@ import {
 import { generateDigest } from "./digest.ts";
 import { digestEmail, digestSubject, mailer, notAdmittedEmail } from "./mailer.ts";
 import { describeMatch, detectLeaveCommand } from "./leave-command.ts";
-import { classifyAdmission, decide } from "./poll-decision.ts";
+import { classifyAdmission, decide, elapsedMs } from "./poll-decision.ts";
 import { toPlainText, toRows } from "./transcript.ts";
 import {
   getBotState,
@@ -39,6 +40,20 @@ const THRESHOLDS = {
   admitThreshold: config.poll.admitThreshold,
   maxDurationMs: config.poll.maxDurationMs,
 };
+
+/**
+ * Thresholds for one meeting. Everything is global except the ceiling, which a
+ * demo invite sets for itself — that limit is the product ("try it for ten
+ * minutes"), not a safety valve, so it belongs to the invite rather than to the
+ * deployment.
+ */
+function thresholdsFor(meeting: MeetingRow): typeof THRESHOLDS {
+  if (meeting.invite_id === null) return THRESHOLDS;
+  const invite = getInvite(meeting.invite_id);
+  return invite === undefined
+    ? THRESHOLDS
+    : { ...THRESHOLDS, maxDurationMs: invite.max_duration_ms };
+}
 
 const inFlight = new Set<string>();
 let timer: NodeJS.Timeout | null = null;
@@ -190,6 +205,7 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
   }
 
   const stalled = segmentCount === meeting.last_segment_count;
+  const limits = thresholdsFor(meeting);
 
   const decision = decide(
     {
@@ -200,9 +216,9 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
       segmentCount,
       lastSegmentCount: meeting.last_segment_count,
       botRunning: running,
-      ageMs: Date.now() - meeting.created_at,
+      ageMs: elapsedMs(meeting, Date.now()),
     },
-    THRESHOLDS,
+    limits,
   );
 
   switch (decision.action) {
@@ -211,7 +227,7 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
       if (stalePolls > 0 && stalePolls % 5 === 0) {
         console.log(
           `[poll] ${meeting.id} no new transcript for ${stalePolls} polls ` +
-            `(ends at ${THRESHOLDS.staleThreshold})`,
+            `(ends at ${limits.staleThreshold})`,
         );
       }
       updateMeeting(meeting.id, {
@@ -220,6 +236,9 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
         gone_polls: 0,
         stale_polls: stalePolls,
         last_segment_count: segmentCount,
+        // Stamped once, on the first poll that sees the bot past the lobby.
+        // This is where a demo's clock starts.
+        ...(meeting.admitted_at === null ? { admitted_at: Date.now() } : {}),
       });
       return;
     }
@@ -232,10 +251,20 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
       });
       return;
 
-    case "finalise":
-      updateMeeting(meeting.id, { last_segment_count: segmentCount });
+    case "finalise": {
+      // The ceiling is an ordinary ending for a demo, not a failure, so say so
+      // in the words the visitor will read on the page.
+      const hitCeiling = decision.reason.startsWith("maximum meeting duration");
+      const demoMinutes = Math.round(limits.maxDurationMs / 60000);
+      updateMeeting(meeting.id, {
+        last_segment_count: segmentCount,
+        ...(hitCeiling && meeting.invite_id !== null && meeting.end_reason === null
+          ? { end_reason: `The ${demoMinutes}-minute demo ended and the bot left.` }
+          : {}),
+      });
       await finalise(meeting.id, decision.reason);
       return;
+    }
 
     case "not-admitted": {
       const detail = await getMeetingDetail(meeting.vexa_meeting_id);

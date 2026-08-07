@@ -70,8 +70,15 @@ So three signals, in priority order:
 | Bot disappears from `/bots/status` | 2 polls (~40s) | Bot crashed or was withdrawn |
 | Bot never admitted, nothing transcribed | 15 polls (5 min) | Nobody let it in from the lobby |
 | Vexa reports `awaiting_admission_rejected` | next poll (~20s) | Someone clicked Deny |
+| Demo ceiling reached | per invite (10 min) | A guest's trial run is over |
 
-That last row is a shortcut, not a fourth timer. Admission fails in two ways
+The demo ceiling is measured **from admission, not from dispatch** — see
+`elapsedMs` in `src/poll-decision.ts`. Charging lobby time to a ten-minute trial
+means a first-timer hunting for the Admit button gets a bot that leaves almost
+as soon as it arrives. The owner's own meetings keep the three-hour ceiling from
+`config.poll.maxDurationMs`, where the distinction is noise.
+
+The `awaiting_admission_rejected` row is a shortcut, not a separate timer. Admission fails in two ways
 that read very differently — nobody got round to it, versus somebody looked and
 said no — and Vexa records the second within seconds. Reading it turns a
 five-minute silence into a 20-second answer with the right explanation. The
@@ -86,6 +93,34 @@ admission timeout instead.
 
 That logic is pure and tested — see `src/poll-decision.ts` and
 `test/poll-decision.test.ts`.
+
+## Letting someone else try it
+
+The app is single-tenant by default — `APP_SECRET` is the owner's login and the
+owner sees everything. Guests come in on **invite links** instead, minted at
+`/admin/invites`:
+
+```
+https://nishan.fly.dev/try/4K2P9WXM
+```
+
+The link *is* the login: possession of the token is the authorisation, so there
+is no account, no password and no signup. It carries one meeting and a ten-minute
+ceiling by default, and the label typed when minting is what the digest
+attributes that guest's action items to.
+
+The token is Crockford base32 (no `I`, `L`, `O` or `U`) because links get
+truncated in chat previews and read aloud off screens — the same value has to
+survive being typed, so `/` takes a code as well as the link.
+
+Every read that a URL can reach takes a `Scope`, so a guest sees only the
+meetings their own token created and never the owner's. That is a compile-time
+property, not a convention: the parameter is required, so a missed call site is
+a type error rather than a leaked transcript.
+
+Revoking an invite expires it rather than deleting it — the label is what past
+digests attribute to, so closing the door shouldn't rewrite the history behind
+it. A guest keeps access to the meeting they already ran.
 
 ### Voice command: "Nishan, leave the meeting"
 

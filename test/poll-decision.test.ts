@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   classifyAdmission,
   decide,
+  elapsedMs,
   type PollState,
   type Thresholds,
 } from "../src/poll-decision.ts";
@@ -187,4 +188,37 @@ test("a failure somewhere other than admission is not a lobby rejection", () => 
       .rejected,
     false,
   );
+});
+
+// ── When the clock starts ────────────────────────────────────────────────────
+
+test("the clock runs from admission once the bot is in", () => {
+  const meeting = { created_at: 1_000, admitted_at: 5_000 };
+  assert.equal(elapsedMs(meeting, 11_000), 6_000);
+});
+
+test("time spent in the lobby is not charged to the meeting", () => {
+  // The regression this guards: measured from dispatch, a 10-minute demo whose
+  // owner took 4 minutes to find the Admit button gets 6 minutes of meeting.
+  const dispatched = 0;
+  const admitted = 4 * 60_000;
+  const now = admitted + 60_000; // one minute into the actual call
+  assert.equal(elapsedMs({ created_at: dispatched, admitted_at: admitted }, now), 60_000);
+});
+
+test("a bot still in the lobby is measured from dispatch", () => {
+  // Nothing has been admitted, so there is no better origin — and the ceiling
+  // must still bound a bot nobody ever lets in, rather than never firing.
+  assert.equal(elapsedMs({ created_at: 1_000, admitted_at: null }, 4_000), 3_000);
+});
+
+test("a short demo ceiling ends a meeting the three-hour one would not", () => {
+  const TEN_MINUTES = { ...LIMITS, maxDurationMs: 10 * 60_000 };
+  const live = { botRunning: true, botSeen: true, segmentCount: 20, lastSegmentCount: 19 };
+
+  // Nine minutes in: still going under either ceiling.
+  assert.equal(decide(state({ ...live, ageMs: 9 * 60_000 }), TEN_MINUTES).action, "live");
+  // Eleven minutes: over the demo's ceiling, nowhere near the default.
+  assert.equal(decide(state({ ...live, ageMs: 11 * 60_000 }), TEN_MINUTES).action, "finalise");
+  assert.equal(decide(state({ ...live, ageMs: 11 * 60_000 }), LIMITS).action, "live");
 });
