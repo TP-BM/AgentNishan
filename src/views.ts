@@ -1,5 +1,6 @@
 import type { MeetingRow, DigestRow, SegmentRow, Identity } from "./db.ts";
 import type { ActionItem, Decision } from "./digest.ts";
+import { formatInviteToken, inviteUsable, type Invite } from "./invite.ts";
 import { formatTimestamp, toTurns, durationSeconds } from "./transcript.ts";
 
 export function escapeHtml(value: string): string {
@@ -52,6 +53,18 @@ button.danger { background: transparent; color: var(--err); border: 1px solid va
 .flash { padding: 12px 14px; border-radius: 8px; margin-bottom: 20px; font-size: 14px; }
 .flash.err { background: color-mix(in srgb, var(--err) 12%, transparent); color: var(--err); }
 .flash.ok  { background: color-mix(in srgb, var(--ok) 12%, transparent); color: var(--ok); }
+ul.invites { list-style: none; padding: 0; margin: 0; }
+ul.invites li { border-top: 1px solid var(--line); padding: 14px 2px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+ul.invites .who { font-weight: 500; flex: 1; min-width: 120px; }
+ul.invites .code { font: 600 15px/1 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .04em; }
+/* Deliberately not an <input>: the mobile rule below forces inputs to 16px to
+   stop iOS zooming on focus, which overflows a link this long and shows it
+   truncated. A div wraps instead, and tapping still selects the whole thing. */
+.link {
+  flex-basis: 100%; padding: 9px 11px; border: 1px solid var(--line); border-radius: 8px;
+  background: var(--card); color: var(--muted); cursor: pointer;
+  font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere;
+}
 ul.meetings { list-style: none; padding: 0; margin: 0; }
 ul.meetings li { border-top: 1px solid var(--line); }
 ul.meetings a { display: flex; align-items: center; gap: 12px; padding: 14px 2px; text-decoration: none; color: inherit; }
@@ -146,7 +159,7 @@ ${
   nav
     ? `<header>
   <h1><a href="/">MeetNish</a></h1>
-  <nav><a href="/">Meetings</a><a href="/settings">Settings</a><a href="/logout">Log out</a></nav>
+  <nav><a href="/">Meetings</a><a href="/admin/invites">Invites</a><a href="/settings">Settings</a><a href="/logout">Log out</a></nav>
 </header>`
     : ""
 }
@@ -397,5 +410,68 @@ export function settingsPage(
 
   <button type="submit" style="margin-top:24px">Save</button>
 </form>`,
+  );
+}
+
+/**
+ * The owner's invite desk: mint a link, see who has one, close it again.
+ *
+ * The link field is the point of the page — it is read-only and full-width so
+ * it can be selected and pasted into a chat without hunting. The grouped code
+ * is shown next to it for the case where someone reads it out instead.
+ */
+export function invitesPage(
+  invites: Invite[],
+  baseUrl: string,
+  error: string,
+  notice: string,
+): string {
+  const now = Date.now();
+
+  const row = (invite: Invite): string => {
+    const verdict = inviteUsable(invite, now);
+    const spent = invite.meetings_used >= invite.max_meetings;
+    const chip = verdict.usable
+      ? `<span class="chip live">open</span>`
+      : `<span class="chip ${spent ? "done" : "failed"}">${spent ? "used" : "revoked"}</span>`;
+    const link = `${baseUrl}/try/${invite.token}`;
+    const minutes = Math.round(invite.max_duration_ms / 60000);
+
+    return `<li>
+  <span class="who">${escapeHtml(invite.label)}</span>
+  <span class="code">${escapeHtml(formatInviteToken(invite.token))}</span>
+  ${chip}
+  <span class="when">${escapeHtml(`${minutes} min · ${relative(invite.created_at)}`)}</span>
+  ${
+    verdict.usable
+      ? `<form method="post" action="/admin/invites/${encodeURIComponent(invite.token)}/revoke">
+  <button type="submit" class="danger">Revoke</button>
+</form>`
+      : ""
+  }
+  ${
+    verdict.usable
+      ? `<div class="link" title="Tap to select" onclick="const r=document.createRange();r.selectNodeContents(this);const s=getSelection();s.removeAllRanges();s.addRange(r)">${escapeHtml(link)}</div>`
+      : ""
+  }
+</li>`;
+  };
+
+  const list =
+    invites.length === 0
+      ? `<p class="empty">No invites yet. Create one above and send the link.</p>`
+      : `<ul class="invites">${invites.map(row).join("")}</ul>`;
+
+  return layout(
+    "Invites — MeetNish",
+    `${flash(error, notice)}
+<form class="paste" method="post" action="/admin/invites">
+  <input type="text" name="label" placeholder="Who is it for? e.g. Marcus" autofocus required>
+  <button type="submit">Create invite</button>
+</form>
+<p class="hint">One meeting each, ten minutes, no expiry until you revoke it. The name is
+what the digest attributes their action items to, so use the one they go by in meetings.</p>
+<h2>Invites</h2>
+${list}`,
   );
 }

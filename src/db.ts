@@ -373,8 +373,19 @@ export function consumeInvite(token: string): boolean {
   return result.changes > 0;
 }
 
-export function deleteInvite(token: string): void {
-  db.prepare("DELETE FROM invites WHERE token = ?").run(token);
+/**
+ * Stop a link working, without losing the row.
+ *
+ * Expiry rather than deletion: the label is what the digest attributes action
+ * items to, so deleting the invite would orphan meetings it already created and
+ * strip the name off them. Revoking closes the door and leaves the history
+ * intact.
+ */
+export function revokeInvite(token: string): void {
+  db.prepare("UPDATE invites SET expires_at = ? WHERE token = ?").run(
+    Date.now(),
+    token,
+  );
 }
 
 // --- segments ----------------------------------------------------------------

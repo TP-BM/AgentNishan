@@ -5,6 +5,7 @@ import formbody from "@fastify/formbody";
 import { config } from "./config.ts";
 import {
   ADMIN,
+  createInvite,
   createMeeting,
   db,
   deleteMeeting,
@@ -12,17 +13,21 @@ import {
   getIdentity,
   getMeeting,
   getSegments,
+  listInvites,
   listMeetings,
+  revokeInvite,
   setSetting,
   updateMeeting,
   type Scope,
 } from "./db.ts";
+import { formatInviteToken } from "./invite.ts";
 import { parseMeetingId } from "./meet-url.ts";
 import { finalise, refetchAndDigest, startPoller, stopPoller } from "./poller.ts";
 import { checkKeys, sendBot, VexaError } from "./vexa.ts";
 import {
   STYLES,
   homePage,
+  invitesPage,
   loginPage,
   meetingPage,
   settingsPage,
@@ -68,6 +73,14 @@ app.addHook("onRequest", async (request, reply) => {
   const unsigned = raw === undefined ? null : request.unsignCookie(raw);
   if (unsigned?.valid !== true || unsigned.value !== SESSION_VALUE) {
     return reply.redirect("/login");
+  }
+
+  // Everything under /admin is the owner's, stated once here rather than per
+  // route — so a route added later under that prefix cannot be reachable by a
+  // demo visitor just because someone forgot a check. Redundant today, since
+  // only admin sessions exist; load-bearing the moment invite sessions do.
+  if (request.url.startsWith("/admin") && request.scope.kind !== "admin") {
+    return reply.redirect("/");
   }
 });
 
@@ -232,6 +245,42 @@ app.post<{ Params: { id: string } }>("/m/:id/delete", async (request, reply) => 
   deleteMeeting(request.scope, request.params.id);
   return reply.redirect("/?ok=" + encodeURIComponent("Meeting deleted."));
 });
+
+// --- invites (owner only) ----------------------------------------------------
+
+app.get("/admin/invites", async (request, reply) => {
+  const { error, notice } = flashOf(request.query);
+  html(reply, invitesPage(listInvites(), config.baseUrl, error, notice));
+});
+
+app.post("/admin/invites", async (request, reply) => {
+  const body = (request.body ?? {}) as Record<string, unknown>;
+  const label = typeof body["label"] === "string" ? body["label"].trim() : "";
+
+  if (label === "") {
+    return reply.redirect(
+      "/admin/invites?err=" + encodeURIComponent("Give the invite a name."),
+    );
+  }
+
+  const invite = createInvite({ label });
+  return reply.redirect(
+    "/admin/invites?ok=" +
+      encodeURIComponent(
+        `Invite for ${label}: ${formatInviteToken(invite.token)} — copy the link below.`,
+      ),
+  );
+});
+
+app.post<{ Params: { token: string } }>(
+  "/admin/invites/:token/revoke",
+  async (request, reply) => {
+    revokeInvite(request.params.token);
+    return reply.redirect(
+      "/admin/invites?ok=" + encodeURIComponent("Invite revoked — the link no longer works."),
+    );
+  },
+);
 
 // --- settings ----------------------------------------------------------------
 
