@@ -5,6 +5,7 @@ import {
   countSegments,
   getIdentity,
   getInvite,
+  identityNames,
   getMeeting,
   getSegments,
   interruptedMeetings,
@@ -16,7 +17,11 @@ import {
 } from "./db.ts";
 import { generateDigest } from "./digest.ts";
 import { digestEmail, digestSubject, mailer, notAdmittedEmail } from "./mailer.ts";
-import { describeMatch, detectLeaveCommand } from "./leave-command.ts";
+import {
+  describeMatch,
+  detectLeaveCommand,
+  namesFromBotName,
+} from "./leave-command.ts";
 import { classifyAdmission, decide, elapsedMs } from "./poll-decision.ts";
 import { toPlainText, toRows } from "./transcript.ts";
 import {
@@ -134,10 +139,16 @@ async function pollMeeting(meeting: MeetingRow): Promise<void> {
   // over the timers. Scans the whole transcript rather than just this poll's
   // additions: cheap, and it means a command spoken during a poll that failed
   // is still honoured on the next one.
-  const listeningForName = config.leaveCommand.names.length > 0;
-  if (config.leaveCommand.enabled && (listeningForName || config.leaveCommand.nameless)) {
+  // The spoken name is whatever the bot joined under, minus the requester's own
+  // name — see namesFromBotName. That keeps the trigger equal to what everyone
+  // in the room can actually see in the participant list.
+  if (config.leaveCommand.enabled) {
+    const names = namesFromBotName(
+      meeting.bot_name ?? config.vexa.botName,
+      identityNames(getIdentity(scopeOf(meeting))),
+    );
     const match = detectLeaveCommand(toPlainText(getSegments(meeting.id)), {
-      names: config.leaveCommand.names,
+      names,
       window: config.leaveCommand.window,
       nameless: config.leaveCommand.nameless,
     });

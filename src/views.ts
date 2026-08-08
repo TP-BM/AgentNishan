@@ -213,7 +213,7 @@ ${refreshSeconds === undefined ? "" : `<meta http-equiv="refresh" content="${ref
 ${
   nav
     ? `<header>
-  <h1><a href="/">MeetNish</a></h1>
+  <h1><a href="/">Sendlegate</a></h1>
   <nav><a href="/">Meetings</a><a href="/admin/invites">Invites</a><a href="/settings">Settings</a><a href="/logout">Log out</a></nav>
 </header>`
     : ""
@@ -250,9 +250,9 @@ const STATUS_LABEL: Record<string, string> = {
 
 export function loginPage(error: string): string {
   return layout(
-    "Log in — MeetNish",
+    "Log in — Sendlegate",
     `<div class="login">
-<h1 style="margin-bottom:20px">MeetNish</h1>
+<h1 style="margin-bottom:20px">Sendlegate</h1>
 ${flash(error, "")}
 <form method="post" action="/login">
   <input type="password" name="secret" placeholder="Shared secret" autofocus required>
@@ -308,7 +308,7 @@ export function homePage(
       : "";
 
   return layout(
-    "MeetNish",
+    "Sendlegate",
     `${flash(error, notice)}${setupWarning}
 ${dispatch}
 <h2>Meetings</h2>
@@ -464,7 +464,7 @@ export function settingsPage(
   notice: string,
 ): string {
   return layout(
-    "Settings — MeetNish",
+    "Settings — Sendlegate",
     `${flash(error, notice)}
 <h1 style="margin-bottom:20px">Settings</h1>
 <form method="post" action="/settings">
@@ -534,7 +534,7 @@ export function invitesPage(
       : `<ul class="invites">${invites.map(row).join("")}</ul>`;
 
   return layout(
-    "Invites — MeetNish",
+    "Invites — Sendlegate",
     `${flash(error, notice)}
 <form class="paste" method="post" action="/admin/invites">
   <input type="text" name="label" placeholder="Who is it for? e.g. Marcus" autofocus required>
@@ -556,7 +556,7 @@ export function tryPage(invite: Invite, error: string, notice: string): string {
   const minutes = Math.round(invite.max_duration_ms / 60000);
 
   return layout(
-    "Send your notetaker — MeetNish",
+    "Send your notetaker — Sendlegate",
     `<div class="login" style="max-width:520px">
 <h1 style="margin-bottom:6px">Send your notetaker</h1>
 <p class="hint" style="margin-bottom:24px">Hello ${escapeHtml(invite.label)} — it joins the meeting,
@@ -601,9 +601,9 @@ lobby — it cannot let itself in. Anyone can say <em>&ldquo;stop recording&rdqu
 /** An invite that has been spent, revoked or never existed. All look alike. */
 export function inviteClosedPage(reason: string): string {
   return layout(
-    "Invite closed — MeetNish",
+    "Invite closed — Sendlegate",
     `<div class="closed">
-<h1 style="margin-bottom:12px">MeetNish</h1>
+<h1 style="margin-bottom:12px">Sendlegate</h1>
 <p>${escapeHtml(reason)}</p>
 </div>`,
     false,
@@ -637,7 +637,7 @@ export function landingPage(error: string): string {
   };
 
   return layout(
-    "MeetNish — a notetaker for the meetings you miss",
+    "Sendlegate — a notetaker for the meetings you miss",
     `<div class="pitch">
 <h1>Send a notetaker to the meeting you're missing</h1>
 <p class="lede">It joins, listens, and emails you what was decided and what landed on
@@ -657,7 +657,7 @@ ${flash(error, "")}
          spellcheck="false" autofocus required aria-label="Invite code">
   <button type="submit">Go</button>
 </form>
-<p class="hint" style="margin-top:8px">MeetNish is invite-only while it's being tried out.
+<p class="hint" style="margin-top:8px">Sendlegate is invite-only while it's being tried out.
 Ask Thilina for a code.</p>
 
 <h2>What you get</h2>

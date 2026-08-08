@@ -8,19 +8,25 @@ primary_region = "fra"
 # reviewable. Credentials go to `fly secrets set` instead.
 [env]
 PORT = "8080"
+# Deliberately still meetnish.db: this is the live file on the volume, holding
+# every meeting, transcript and digest. Renaming the product does not rename a
+# database — pointing at a new path would silently start an empty one and
+# strand the old. The filename is invisible to users.
 DATABASE_PATH = "/data/meetnish.db"
-APP_BASE_URL = "https://nishan.fly.dev"
+APP_BASE_URL = "https://sendlegate.online"
 VEXA_BASE_URL = "https://api.cloud.vexa.ai"
-VEXA_BOT_NAME = "Thilina's Agent (Nishan)"
+VEXA_BOT_NAME = "Sendlegate Notetaker"
 VEXA_LANGUAGE = "en"
 ANTHROPIC_MODEL = "claude-opus-5"
 MAILER = "resend"
-MAIL_FROM = "onboarding@resend.dev"
+# Resend's shared sender can only deliver to the account owner's own address,
+# so every guest digest would 403. A verified domain is what makes the demo
+# able to mail anyone. Kept on a subdomain so sending reputation stays off the
+# apex.
+MAIL_FROM = "Sendlegate <digest@mail.sendlegate.online>"
 POLL_STALE_THRESHOLD = "6"
 POLL_ADMIT_THRESHOLD = "15"
 LEAVE_COMMAND_ENABLED = "true"
-# "nathan" is an observed mishearing, not a person — see README.
-LEAVE_COMMAND_NAMES = "nishan,nishaan,nishawn,nissan,nathan,nish"
 LEAVE_COMMAND_NAMELESS = "true"
 
 # The poller has to keep running between meetings, so the machine must not be
@@ -40,7 +46,7 @@ path = "/healthz"
 timeout = "5s"
 
 [mounts]
-source = "meetnish_data"
+source = "sendlegate_data"
 destination = "/data"
 
 [[vm]]

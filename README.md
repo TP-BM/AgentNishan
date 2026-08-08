@@ -1,4 +1,4 @@
-# MeetNish
+# Sendlegate
 
 Paste a Google Meet link when you know you'll miss a meeting. A Vexa bot joins,
 transcribes, and when the meeting ends you get an emailed digest with the
@@ -36,8 +36,10 @@ startup so that mismatch surfaces immediately:
 Then open the app, log in with `APP_SECRET`, and set your name under
 **Settings** — without it nothing can be flagged as *your* action item.
 
-Email defaults to Resend (`MAILER=resend`). On the free tier you can send from
-`onboarding@resend.dev` to your own account address with no domain setup. Set
+Email defaults to Resend (`MAILER=resend`). **`onboarding@resend.dev` only
+delivers to your own Resend account address** — it is a sandbox, and sending to
+anyone else returns 403, so a verified domain is required before guests can be
+emailed. Set
 `MAILER=smtp` to use Gmail or any SMTP server instead, or `MAILER=none` to skip
 email entirely and just read digests in the app.
 
@@ -101,7 +103,7 @@ owner sees everything. Guests come in on **invite links** instead, minted at
 `/admin/invites`:
 
 ```
-https://nishan.fly.dev/try/4K2P9WXM
+https://sendlegate.online/try/4K2P9WXM
 ```
 
 The link *is* the login: possession of the token is the authorisation, so there
@@ -122,7 +124,7 @@ Revoking an invite expires it rather than deleting it — the label is what past
 digests attribute to, so closing the door shouldn't rewrite the history behind
 it. A guest keeps access to the meeting they already ran.
 
-### Voice command: "Nishan, leave the meeting"
+### Voice command: "<bot name>, leave the meeting"
 
 Say the bot's name followed by a departure instruction and it leaves, then
 digests what it captured. The bot cannot hear — this reads the transcript on
@@ -131,9 +133,20 @@ each poll — so there are two consequences worth setting expectations around:
 - **It is not instant.** One poll interval plus transcription lag: roughly
   20–40s. People will repeat themselves. Lower `POLL_INTERVAL_MS` if that
   matters more than API calls.
-- **It depends on speech-to-text getting the name close.** "Nishan" routinely
-  arrives as "Nissan". `LEAVE_COMMAND_NAMES` is a list of variants for exactly
-  this reason — add whatever mishearings you observe in real transcripts.
+- **It depends on speech-to-text getting the name close.** Proper nouns are
+  what ASR mangles worst, which is why the nameless phrases below exist.
+
+**The name is not configured anywhere — it is derived from the name the bot
+joined under** (`namesFromBotName`). The participant list is the only clue
+anyone in the room has, so what it says there is what they will say out loud;
+deriving from it means the trigger can never drift from what people can see.
+
+Two rules keep that safe. Words describing the job — *notetaker*, *bot*,
+*assistant* — are not names and are dropped. And **the requester's own name is
+excluded**: the default bot name is `<requester>'s notetaker`, so without that
+exclusion the bot would listen for a person sitting in the meeting, and "Marcus,
+you can go" said to Marcus would end the recording. If nothing distinctive
+survives, the meeting simply has no spoken name and relies on the phrases below.
 
 Matching requires a name *and* a command phrase, with the command starting
 within 60 characters after the name. Both halves are needed so that "Marcus had
@@ -168,12 +181,11 @@ on this transcript it does produce a match, by stitching "nathan" to a "stop
 recording" said 100 characters later by someone else. The test in
 `test/leave-command.test.ts` pins that transcript so the tradeoff stays visible.
 
-Set `LEAVE_COMMAND_ENABLED=false` to turn the whole thing off,
-`LEAVE_COMMAND_NAMELESS=false` for name-only matching, or leave
-`LEAVE_COMMAND_NAMES` empty for nameless-only. When it fires, the reason is
+Set `LEAVE_COMMAND_ENABLED=false` to turn the whole thing off, or
+`LEAVE_COMMAND_NAMELESS=false` for name-only matching. When it fires, the reason is
 recorded and shown on the meeting page so an unexpected ending is explainable.
 
-**Known limitation:** "should we ask Nishan to leave the meeting?" will trigger
+**Known limitation:** "should we ask Ghost to leave the meeting?" will trigger
 it. Distinguishing a question from an instruction in unpunctuated ASR output is
 not reliably solvable, and the cost is low — the digest is still produced from
 everything captured up to that point, and Vexa keeps the transcript, so
@@ -238,7 +250,7 @@ failure this app cannot tolerate. Create the app explicitly instead:
 
 ```bash
 fly apps create <name> --org personal
-fly volumes create meetnish_data --size 1 --region fra --yes
+fly volumes create sendlegate_data --size 1 --region fra --yes
 fly secrets set VEXA_BOT_API_KEY=… VEXA_TX_API_KEY=… ANTHROPIC_API_KEY=… \
                 RESEND_API_KEY=… APP_SECRET=… NOTIFY_EMAIL=…
 fly deploy --ha=false
@@ -253,7 +265,7 @@ Confirm it came up correctly:
 
 ```bash
 fly logs --app <name> --no-tail | grep -E "\[web\]|\[vexa\]"
-# [web] MeetNish listening on https://<name>.fly.dev
+# [web] Sendlegate listening on https://<name>.fly.dev
 # [vexa] both keys OK (bot + transcription)
 ```
 

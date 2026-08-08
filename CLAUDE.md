@@ -1,4 +1,4 @@
-# Working on MeetNish
+# Working on Sendlegate
 
 ## Deployment
 
@@ -25,7 +25,7 @@ code that exists nowhere else.
 ### After every deploy, verify — don't trust the success message
 
 ```
-[web] MeetNish listening on https://nishan.fly.dev
+[web] Sendlegate listening on https://sendlegate.online
 [vexa] both keys OK (bot + transcription)
 ```
 
@@ -34,6 +34,10 @@ credential before a real meeting does.
 
 ### Rules that have already cost us
 
+- **The Fly app is still named `nishan`.** That name is internal — it appears
+  in `fly deploy --app nishan` and nowhere a user can see. Renaming a Fly app
+  means recreating it and losing the volume, so it stays. The product is
+  Sendlegate; the deployment target is `nishan`.
 - **Never `fly launch`.** It regenerates `fly.toml` and overwrites
   `auto_stop_machines = false`. A sleeping machine stops polling and loses the
   meeting.

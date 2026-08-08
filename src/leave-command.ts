@@ -1,5 +1,5 @@
 /**
- * Voice command: "Nishan, leave the meeting".
+ * Voice command: "<bot name>, leave the meeting".
  *
  * The bot cannot hear anything — it only produces a transcript. So the command
  * is detected by reading that transcript on each poll. Two consequences worth
@@ -8,8 +8,9 @@
  *   - Latency is one poll interval plus transcription lag, so ~20-40s by
  *     default. It is not instant, and people will repeat themselves.
  *   - Detection happens on speech-to-text output, which mangles proper nouns
- *     badly. "Nishan" comes back as "Nissan", "Nishawn", "nish an". Matching has
- *     to be forgiving about the name and strict about the command.
+ *     worst of all. A bot called "Nishan" came back as "Nissan" and "Nathan" in
+ *     a real meeting. Matching is forgiving about the name and strict about the
+ *     command, and the nameless phrases exist because even that is not enough.
  */
 
 export interface LeaveCommandConfig {
@@ -25,19 +26,52 @@ export interface LeaveCommandConfig {
   nameless?: boolean;
 }
 
-export const DEFAULT_NAMES = [
-  "nishan",
-  "nishaan",
-  "nishan's",
-  "nissan", // the single most common mishearing
-  "nathan", // observed in a real meeting, 2026-08-06
-  "nishawn",
-  "nish",
-];
+/**
+ * Words that describe the bot's job rather than name it. A phrase made only of
+ * these is not a name anyone would address.
+ */
+const GENERIC = new Set([
+  "notetaker", "note", "notes", "taker", "bot", "assistant", "agent", "ai",
+  "minutes", "recorder", "recording", "scribe", "the", "a", "s",
+]);
+
+/**
+ * Spoken triggers for one meeting, derived from the name the bot actually
+ * joined under.
+ *
+ * The participant list is the only clue anyone in the room has, so what it says
+ * there is what they will say out loud. Deriving from it means the trigger is
+ * always the name people can see, instead of a list configured somewhere they
+ * cannot.
+ *
+ * `exclude` is what stops this being dangerous. The default bot name is
+ * "<requester>'s notetaker", and matching its words would listen for the
+ * requester — who is a person in the meeting. "Marcus, you can go" said to
+ * Marcus would end the recording. So the requester's own names are removed, and
+ * if nothing distinctive survives, the meeting simply has no spoken name and
+ * relies on the nameless phrases.
+ */
+export function namesFromBotName(botName: string, exclude: string[] = []): string[] {
+  const banned = new Set(
+    exclude.flatMap((name) => normalise(name).split(" ")).filter(Boolean),
+  );
+
+  const meaningful = normalise(botName)
+    .split(" ")
+    .filter((word) => word !== "" && !GENERIC.has(word));
+
+  const distinctive = meaningful.filter(
+    (word) => word.length >= 3 && !banned.has(word),
+  );
+  if (distinctive.length === 0) return [];
+
+  // The joined phrase first, so a full utterance matches before a single word.
+  return [...new Set([distinctive.join(" "), ...distinctive])];
+}
 
 /**
  * Command phrases. Deliberately specific: a bare "leave" would fire on
- * "Nishan, leave that with me". Each must read as an instruction to depart.
+ * "Ghost, leave that with me". Each must read as an instruction to depart.
  */
 const COMMANDS = [
   "leave the meeting",

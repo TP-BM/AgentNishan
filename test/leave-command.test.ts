@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
-  DEFAULT_NAMES,
   describeMatch,
   detectLeaveCommand,
+  namesFromBotName,
   normalise,
 } from "../src/leave-command.ts";
 
-const CONFIG = { names: DEFAULT_NAMES, window: 60 };
+// The names are whatever the bot joined under. These tests use a bot called
+// "Nishan" because the real transcript below came from one.
+const CONFIG = { names: namesFromBotName("Nishan"), window: 60 };
 const detect = (text: string) => detectLeaveCommand(text, CONFIG);
 
 test("fires on the phrase as spoken", () => {
@@ -25,11 +27,11 @@ test("survives the way transcripts actually arrive", () => {
   );
 });
 
-test("tolerates the name being misheard", () => {
-  // "Nissan" is the common one; the others show up too.
-  assert.ok(detect("nissan leave the meeting"));
-  assert.ok(detect("nishawn you can go"));
-  assert.ok(detect("nishaan please leave"));
+test("a bot named something else answers to that instead", () => {
+  const ghost = (text: string) =>
+    detectLeaveCommand(text, { names: namesFromBotName("Ghost"), window: 60 });
+  assert.ok(ghost("ghost you can leave"));
+  assert.equal(ghost("nishan you can leave"), null);
 });
 
 test("accepts alternative phrasings of the command", () => {
@@ -146,20 +148,14 @@ test("real meeting, 2026-08-06: the command was missed three ways", () => {
     "Thanks for staying here", // the room noticing it did not work
   ].join("\n");
 
-  // What shipped at the time: a name was required, and "nathan" was not a
-  // known variant.
-  assert.equal(
-    detectLeaveCommand(transcript, {
-      names: ["nishan", "nishaan", "nishawn", "nissan", "nish"],
-      window: 60,
-    }),
-    null,
-  );
-
-  // "nathan" alone still misses: the name lands 100+ characters from any
-  // command, so widening the window would only stitch together unrelated
-  // speech.
+  // A name was required, and ASR never produced the bot's actual name near a
+  // command — so no name list, derived or configured, catches this.
   assert.equal(detect(transcript), null);
+  assert.equal(
+    detectLeaveCommand(transcript, { names: namesFromBotName("Nathan"), window: 60 }),
+    null,
+    "even matching the mishearing misses: it lands 100+ chars from any command",
+  );
 
   // The nameless phrase is what actually catches it.
   const match = loose(transcript);
@@ -170,4 +166,41 @@ test("real meeting, 2026-08-06: the command was missed three ways", () => {
 test("normalise strips punctuation and case", () => {
   assert.equal(normalise("Nishan, LEAVE the meeting!"), "nishan leave the meeting");
   assert.equal(normalise("  spaced   out  "), "spaced out");
+});
+
+// ── Names derived from the bot's own name ────────────────────────────────────
+
+test("the trigger is the name people can see in the participant list", () => {
+  assert.deepEqual(namesFromBotName("Ghost"), ["ghost"]);
+  assert.deepEqual(namesFromBotName("Sendlegate Notetaker"), ["sendlegate"]);
+});
+
+test("words describing the job are not names", () => {
+  // Nobody addresses the bot as "notetaker", and matching it would fire on any
+  // meeting that discusses note-taking.
+  assert.deepEqual(namesFromBotName("The Notetaker Bot"), []);
+});
+
+test("the requester's own name is never a trigger", () => {
+  // The whole point of the exclusion. The default bot name is
+  // "<requester>'s notetaker", so without this the bot listens for a person who
+  // is sitting in the meeting — and "Marcus, you can go" ends the recording.
+  assert.deepEqual(namesFromBotName("Marcus's notetaker", ["Marcus"]), []);
+
+  const names = namesFromBotName("Marcus's Ghost", ["Marcus"]);
+  assert.deepEqual(names, ["ghost"]);
+
+  const detect = (t: string) => detectLeaveCommand(t, { names, window: 60 });
+  assert.equal(detect("marcus you can go"), null, "a person, not the bot");
+  assert.ok(detect("ghost you can go"));
+});
+
+test("a two-word name matches whole or by its distinctive word", () => {
+  const names = namesFromBotName("Silent Ghost");
+  assert.deepEqual(names, ["silent ghost", "silent", "ghost"]);
+});
+
+test("very short fragments are not triggers", () => {
+  // "AI" and single letters appear constantly in speech.
+  assert.deepEqual(namesFromBotName("AI Bot"), []);
 });

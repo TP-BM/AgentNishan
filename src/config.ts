@@ -47,7 +47,7 @@ export const config = {
       /\/+$/,
       "",
     ),
-    botName: optional("VEXA_BOT_NAME", "Notetaker"),
+    botName: optional("VEXA_BOT_NAME", "Sendlegate Notetaker"),
     language: optional("VEXA_LANGUAGE", "en"),
   },
 
@@ -94,14 +94,13 @@ export const config = {
     maxDurationMs: 3 * 60 * 60 * 1000,
   },
 
-  /** Voice command: someone says "<name>, leave the meeting" and the bot goes. */
+  /**
+   * Voice command: someone says "<bot name>, leave the meeting" and it goes.
+   * The names come from each meeting's own bot name, not from configuration —
+   * see namesFromBotName in leave-command.ts.
+   */
   leaveCommand: {
     enabled: optional("LEAVE_COMMAND_ENABLED", "true") !== "false",
-    /** Name variants, including likely speech-to-text mishearings. */
-    names: optional("LEAVE_COMMAND_NAMES", "")
-      .split(",")
-      .map((n) => n.trim().toLowerCase())
-      .filter(Boolean),
     /** Characters allowed between the name and the command phrase. */
     window: Number(optional("LEAVE_COMMAND_WINDOW", "60")),
     /**
@@ -117,7 +116,7 @@ export const config = {
 
 if (missing.length > 0) {
   console.error(
-    `\nMeetNish can't start — ${missing.length} required setting${missing.length === 1 ? " is" : "s are"} missing:\n` +
+    `\nSendlegate can't start — ${missing.length} required setting${missing.length === 1 ? " is" : "s are"} missing:\n` +
       missing.map((name) => `  - ${name}`).join("\n") +
       `\n\nCopy .env.example to .env and fill these in. For APP_SECRET, generate one with:\n` +
       `  openssl rand -base64 32\n`,

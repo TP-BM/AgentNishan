@@ -235,7 +235,7 @@ export function notAdmittedEmail(
 <h1 style="font-size:20px;margin:0 0 12px">${escapeHtml(headline)}</h1>
 <p style="margin:0 0 16px;color:#374151">The bot was sent to <a href="${escapeHtml(meetUrl)}">${escapeHtml(meetUrl)}</a> but ${escapeHtml(body)}</p>
 <p style="margin:0;color:#6b7280">${escapeHtml(advice)}</p>
-<p style="margin:24px 0 0"><a href="${escapeHtml(meetingUrl)}" style="color:#2563eb">View in MeetNish →</a></p>
+<p style="margin:24px 0 0"><a href="${escapeHtml(meetingUrl)}" style="color:#2563eb">View in Sendlegate →</a></p>
 </div>`;
   return { subject, html, text };
 }

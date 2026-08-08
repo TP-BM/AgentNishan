@@ -1,4 +1,4 @@
-# MeetNish — Plan
+# Sendlegate — Plan
 
 Paste a Google Meet URL → a Vexa bot joins, transcribes, and when the meeting ends you get an
 emailed digest with the decisions and *your* action items. No bot speech, no calendar access.
@@ -139,7 +139,7 @@ ANTHROPIC_API_KEY=sk-ant-…
 RESEND_API_KEY=re_…
 NOTIFY_EMAIL=thilina.pitiwala@bettermile.com
 APP_SECRET=…            # shared-secret login
-DATABASE_PATH=./data/meetnish.db
+DATABASE_PATH=./data/sendlegate.db
 ```
 
 ## Two things worth flagging before we build

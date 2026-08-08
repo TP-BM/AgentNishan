@@ -559,7 +559,7 @@ app.post("/settings", async (request, reply) => {
 // --- lifecycle ---------------------------------------------------------------
 
 await app.listen({ port: config.port, host: "0.0.0.0" });
-console.log(`[web] MeetNish listening on ${config.baseUrl}`);
+console.log(`[web] Sendlegate listening on ${config.baseUrl}`);
 console.log(
   `[web] mailer=${config.mail.kind} model=${config.anthropic.model} poll=${config.poll.intervalMs}ms`,
 );
