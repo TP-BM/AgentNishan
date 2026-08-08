@@ -42,6 +42,8 @@ export interface MeetingRow {
   objective: string | null;
   /** Name the bot joined under, so the participant list matches what was asked for. */
   bot_name: string | null;
+  /** How many times the digest has been generated. Each one is a paid model call. */
+  digest_runs: number;
 }
 
 /**
@@ -197,6 +199,10 @@ ensureColumn("meetings", "objective", "TEXT");
 // Per-meeting bot name. Vexa takes it per request, and it is what everyone in
 // the room reads in the participant list — so it is the disclosure, not decoration.
 ensureColumn("meetings", "bot_name", "TEXT");
+
+// Every digest run is a paid model call, so it is worth counting rather than
+// trusting that nobody will hold down the retry button.
+ensureColumn("meetings", "digest_runs", "INTEGER NOT NULL DEFAULT 0");
 
 export function newId(): string {
   return randomBytes(6).toString("hex");

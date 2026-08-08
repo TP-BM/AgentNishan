@@ -391,7 +391,11 @@ export async function runDigest(meetingId: string): Promise<void> {
     return;
   }
 
-  updateMeeting(meetingId, { status: "transcribing", error: null });
+  updateMeeting(meetingId, {
+    status: "transcribing",
+    error: null,
+    digest_runs: meeting.digest_runs + 1,
+  });
 
   const identity = getIdentity(scopeOf(meeting));
   let result;

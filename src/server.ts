@@ -43,7 +43,11 @@ import {
   tryPage,
 } from "./views.ts";
 
-const app = Fastify({ logger: false });
+// trustProxy: Fly always fronts this app, so the socket address is its proxy
+// and every visitor would otherwise share one rate-limit bucket — one person
+// mistyping a code would lock out everyone. Only safe because the app is never
+// reachable directly; exposed on its own, the header would be forgeable.
+const app = Fastify({ logger: false, trustProxy: true });
 await app.register(cookie, { secret: config.appSecret });
 await app.register(formbody);
 
@@ -69,6 +73,9 @@ const INVITE_COOKIE = "mn_invite";
 const codeAttempts = new Map<string, { count: number; resetAt: number }>();
 const CODE_LIMIT = 10;
 const CODE_WINDOW_MS = 60 * 60 * 1000;
+
+/** How many times a guest may re-run the digest on their one meeting. */
+const GUEST_DIGEST_LIMIT = 3;
 
 function tooManyCodeAttempts(ip: string, now = Date.now()): boolean {
   const entry = codeAttempts.get(ip);
@@ -280,10 +287,13 @@ app.post<{ Params: { token: string } }>("/try/:token", async (request, reply) =>
   }
 
   const body = (request.body ?? {}) as Record<string, unknown>;
-  const str = (key: string): string =>
-    typeof body[key] === "string" ? (body[key] as string).trim() : "";
+  // Capped here, not just with a maxlength attribute: the objective is pasted
+  // into the digest prompt and the bot name into Vexa's payload, and neither
+  // should be sized by whoever is posting the form.
+  const str = (key: string, limit = 200): string =>
+    typeof body[key] === "string" ? (body[key] as string).trim().slice(0, limit) : "";
 
-  const email = str("email");
+  const email = str("email", 254);
   if (!/^[^@\s]+@[^@\s.]+\.[^@\s]+$/.test(email)) {
     return reply.redirect(back("That email address doesn't look right."));
   }
@@ -309,7 +319,7 @@ app.post<{ Params: { token: string } }>("/try/:token", async (request, reply) =>
       );
   }
 
-  const botName = str("bot_name") === "" ? config.vexa.botName : str("bot_name");
+  const botName = str("bot_name", 60) === "" ? config.vexa.botName : str("bot_name", 60);
   let vexaMeetingId: string | null = null;
   try {
     vexaMeetingId = await sendBot(nativeMeetingId, botName);
@@ -329,7 +339,7 @@ app.post<{ Params: { token: string } }>("/try/:token", async (request, reply) =>
     title: str("title") === "" ? nativeMeetingId : str("title"),
     scope,
     notifyEmail: email,
-    objective: str("objective") === "" ? null : str("objective"),
+    objective: str("objective", 500) === "" ? null : str("objective", 500),
     botName,
   });
   if (vexaMeetingId !== null) {
@@ -458,6 +468,15 @@ app.post<{ Params: { id: string } }>("/m/:id/retry", async (request, reply) => {
     return reply.redirect("/?err=" + encodeURIComponent("Meeting not found."));
   }
 
+  // Each retry is a fresh Opus call. The owner can spend their own money; a
+  // guest holds a link that may have been forwarded, so cap them.
+  if (requireScope(request).kind !== "admin" && meeting.digest_runs >= GUEST_DIGEST_LIMIT) {
+    return reply.redirect(
+      `/m/${meeting.id}?err=` +
+        encodeURIComponent("This demo has already regenerated its digest a few times."),
+    );
+  }
+
   // Re-pull from Vexa rather than reusing local segments — the usual reason for
   // a retry is that the local copy is missing or partial.
   void refetchAndDigest(meeting.id).catch((error: Error) => {
@@ -513,12 +532,19 @@ app.post<{ Params: { token: string } }>(
 
 // --- settings ----------------------------------------------------------------
 
+/**
+ * Settings are global, single-row and the owner's. Notably `notify_email` is
+ * where every one of the owner's digests is sent — so an unguarded write here
+ * is not a defacement, it is mail redirection.
+ */
 app.get("/settings", async (request, reply) => {
+  if (requireScope(request).kind !== "admin") return reply.redirect("/");
   const { error, notice } = flashOf(request.query);
   html(reply, settingsPage(getIdentity(requireScope(request)), error, notice));
 });
 
 app.post("/settings", async (request, reply) => {
+  if (requireScope(request).kind !== "admin") return reply.redirect("/");
   const body = (request.body ?? {}) as Record<string, unknown>;
   const str = (key: string): string =>
     typeof body[key] === "string" ? (body[key] as string).trim() : "";
